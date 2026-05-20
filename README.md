@@ -8,14 +8,6 @@ Student ID：11479116
 Course Code：LELA70502
 
 
-University of Manchester
-
-
-School of Arts, Languages and Cultures
-
-
-Supervisor: Dr. Colin Bannard
-
 ## Overview
 
 We introduce *aligned translation surprisal*, NMT decoder surprisal soft-aligned to source words via cross-attention weights, and test whether it predicts source-text fixation durations during sight translation. Eye-tracking data come from the EMMT corpus (Bhattacharya et al., 2022).
