@@ -1,144 +1,103 @@
 # Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation
 
-**Student ID:** 11479116  
-**Supervisor:** Dr Colin Bannard  
-**Institution:** University of Manchester  
-**Preregistration:** [OSF] *(link to be added upon submission)*
-
----
+Code for the paper: **Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation** (2025).
 
 ## Overview
 
-Lim et al. (2024) showed that NMT **translation surprisal** — surprisal derived from
-a neural machine translation decoder — outperforms monolingual source-language surprisal
-as a predictor of human translation difficulty across 13 language pairs. Yet Lim et al.
-identified a barrier to extending this advantage to source-text eye movements: decoder
-surprisal is conditioned on the full source sequence simultaneously, so it cannot be
-attributed to individual source words.
+We introduce *aligned translation surprisal*, NMT decoder surprisal soft-aligned to source words via cross-attention weights, and test whether it predicts source-text fixation durations during sight translation. Eye-tracking data come from the EMMT corpus (Bhattacharya et al., 2022).
 
-This project bridges that gap by introducing **aligned translation surprisal** — NMT
-decoder surprisal distributed onto individual source words via **soft cross-attention
-alignment** — and asks whether the same pattern Lim et al. observed on the target side
-holds on the **source-text perceptual stage**: does a decoder-derived measure outperform
-a pure source-language model at predicting source-text fixation durations during sight
-translation?
+## Requirements
 
-Data come from the **EMMT corpus** (Bhattacharya et al., 2022): monocular eye-tracking
-recordings of 43 Czech–English bilinguals performing reading aloud and sight translation
-on 200 English sentences.
-
----
-
-## Central Finding
-
-| Predictor | β | Δllh over baseline | p (perm) |
-|---|---|---|---|
-| Aligned translation surprisal (`c_nmt`, soft) | **0.058** | **0.0025** | **.002** |
-| Monolingual surprisal (`c_mono`, GPT-2) | — | 0.0001 | .379 |
-
-The NMT decoder-derived measure yields a significantly larger held-out log-likelihood gain
-than monolingual surprisal, mirroring Lim et al.'s target-side result on the source-text
-perceptual stage. Results are based on 10-fold sentence-level cross-validation with a
-paired permutation test (1,000 permutations).
-
----
-
-## Repository Structure
-
-```
-.
-├── src/                                    # Feature extraction (Python)
-│   ├── extract_nmt_surprisal.py            # Argmax-aligned NMT surprisal (reference)
-│   ├── extract_nmt_surprisal_soft.py       # Soft-aligned NMT surprisal (main method)
-│   ├── plot_alignment.py                   # Cross-attention alignment heatmap figure
-│   ├── extract_attention_features.py       # Encoder entropy and attention-to-context
-│   └── extract_mono_surprisal.py           # GPT-2 monolingual surprisal
-├── paper/
-│   ├── essay.tex                           # Paper (ACL format)
-│   ├── essay.bib                           # Bibliography
-│   ├── acl.sty                             # ACL style file
-│   ├── acl_natbib.bst                      # ACL natbib style
-│   ├── alignment_map.pdf                   # Figure 1: soft alignment heatmap
-│   └── delta_llh_comparison.pdf            # Figure 2: Δllh comparison
-├── preregistration/
-│   ├── osf_preregistration.tex
-│   └── preregistration.bib
-├── data/
-│   └── README.md                           # Data sources and expected file layout
-├── requirements.txt                        # Python dependencies
-└── README.md
-```
-
----
-
-## Hypotheses and Models
-
-| # | Hypothesis | Model |
-|---|---|---|
-| H2 | Aligned translation surprisal positively predicts TFD during sight translation | LME: `log(TFD) ~ c_nmt + controls + RE` (translate, content words) |
-| H2a | `c_nmt` outperforms monolingual surprisal on source-text TFD | 10-fold CV Δllh + paired permutation test |
-
-H2a directly mirrors Lim et al.'s (2024) target-side comparison on the source-text stage.
-
----
-
-## Reproducing the Analysis
-
-### 1. Install Python dependencies
-
+**Python** (feature extraction):
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Extract NMT features
-
-```bash
-python src/extract_nmt_surprisal_soft.py   # soft-aligned surprisal (main)
-python src/extract_mono_surprisal.py        # GPT-2 monolingual surprisal
-python src/plot_alignment.py                # alignment heatmap figure
-```
-
-Output CSVs are written to `data/`.
-
-### 3. Run R analysis
-
+**R** (analysis): The notebook uses an R kernel via [IRkernel](https://irkernel.github.io/).
 ```r
 install.packages(c("lme4", "lmerTest", "dplyr", "ggplot2"))
-source("Dissertation_Data/lme_soft.R")
 ```
 
----
+## Data
 
-## Key Predictors
+Eye-tracking data are from the [EMMT corpus](https://github.com/rgu-iit-bt/emmt) (Bhattacharya et al., 2022) and are not redistributed here. Word frequency norms are from SUBTLEX-US (Brysbaert & New, 2009).
 
-| Variable | Description |
-|---|---|
-| `c_nmt` | Soft-aligned translation surprisal: $\sum_t s_t \cdot \bar\alpha_{tw} / \sum_j \bar\alpha_{tj}$ |
-| `c_mono` | Monolingual surprisal from GPT-2 |
-| `c_freq` | Log word frequency from SUBTLEX-US (Lg10WF) |
-| `c_wlen` | Word length (character count) |
-| `c_wpos` | Normalised within-sentence position |
+Run the extraction scripts in `src/` against your local copy of the EMMT corpus, then set `DATA_DIR` in `result-analysis.ipynb` to the folder containing the output CSV files.
 
-All continuous predictors are *z*-scored using the translate-stage content-word subset
-as the reference distribution.
+## Reproducing the Analysis
 
----
+### Prerequisites
 
-## NMT Model
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/<your-username>/nmt-surprisal-sight-translation.git
+   cd nmt-surprisal-sight-translation
+   ```
 
-All NMT features are extracted from
-[`Helsinki-NLP/opus-mt-en-cs`](https://huggingface.co/Helsinki-NLP/opus-mt-en-cs)
-(Tiedemann & Thottingal, 2020) via HuggingFace Transformers.
+2. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-Monolingual surprisal is extracted from [`gpt2`](https://huggingface.co/gpt2).
+3. Download the [EMMT corpus](https://github.com/rgu-iit-bt/emmt) and note the path to its `preprocessed-data/gaze/` directory.
 
----
+4. Download [SUBTLEX-US](https://www.ugent.be/pp/experimentele-psychologie/en/research/subtlex) and save as `subtlex_us.csv`.
+
+### Step 1 — Extract features
+
+```bash
+# Word-level total fixation duration from raw EMMT gaze files
+python src/extract_fixation_duration.py \
+  --read_dir      /path/to/emmt/preprocessed-data/gaze/Read \
+  --translate_dir /path/to/emmt/preprocessed-data/gaze/Translate \
+  --sentences     /path/to/emmt/probes/Sentences.csv \
+  --output        fixation_durations_word.csv
+
+# Aligned translation surprisal (c_nmt)
+# Uses Helsinki-NLP/opus-mt-en-cs (Tiedemann & Thottingal, 2020);
+# model is downloaded automatically on first run.
+python src/extract_nmt_surprisal_soft.py \
+  --sentences /path/to/emmt/probes/Sentences.csv \
+  --output    nmt_surprisal_soft_word.csv
+
+# Monolingual surprisal (c_mono), uses GPT-2
+python src/extract_monolingual_surprisal.py \
+  --sentences /path/to/emmt/probes/Sentences.csv \
+  --output    monolingual_surprisal_word.csv
+
+# Optional: cross-attention alignment heatmap
+python src/plot_alignment.py \
+  --sentence "A man is blowing into a plastic ball." \
+  --output   alignment_map.pdf
+```
+
+### Step 2 — Run the analysis notebook
+
+Install R dependencies (once):
+```r
+install.packages(c("lme4", "lmerTest", "dplyr", "ggplot2"))
+```
+
+Open the notebook, set `DATA_DIR` to the folder containing the CSV files from Step 1, and run all cells:
+```bash
+jupyter notebook result-analysis.ipynb
+```
+
+Figures are saved to the `figures/` directory.
+
+## Repository Structure
+
+| Path | Description |
+|------|-------------|
+| `src/extract_fixation_duration.py` | Raw EMMT gaze files → word-level TFD |
+| `src/extract_nmt_surprisal_soft.py` | Aligned translation surprisal via soft cross-attention alignment |
+| `src/extract_monolingual_surprisal.py` | GPT-2 monolingual surprisal |
+| `src/plot_alignment.py` | Cross-attention alignment visualisation |
+| `result-analysis.ipynb` | Mixed-effects models and cross-validation (R kernel) |
 
 ## References
 
-- Bahdanau, D., Cho, K., & Bengio, Y. (2015). Neural machine translation by jointly learning to align and translate. *ICLR 2015*.
-- Bhattacharya, S., Kloudová, V., Zouhar, V., & Bojar, O. (2022). EMMT: A simultaneous eye-tracking, 4-electrode EEG and audio corpus for multi-modal reading and translation scenarios. *arXiv:2204.02905*.
-- Lim, Z. W., Vylomova, E., Kemp, C., & Cohn, T. (2024). Predicting human translation difficulty with neural machine translation. *Transactions of the Association for Computational Linguistics*, 12, 1479–1496.
-- Lijewska, A., Chmiel, A., & Inhoff, A. W. (2022). Stages of sight translation: Evidence from eye movements. *Applied Psycholinguistics*, 43(4), 997–1018.
-- Tiedemann, J., & Thottingal, S. (2020). OPUS-MT — Building open translation services for the World. *EAMT 2020*.
-- Brysbaert, M., & New, B. (2009). Moving beyond Kučera and Francis. *Behavior Research Methods*, 41(4), 977–990.
+- Bhattacharya et al. (2022). EMMT corpus. *LREC*.
+- Lim et al. (2024). Predicting Translation Difficulty with NMT. *ACL*.
+- Tiedemann, J. and Thottingal, S. (2020). OPUS-MT. *EAMT*.
+- Brysbaert & New (2009). SUBTLEX-US. *Behavior Research Methods*.
