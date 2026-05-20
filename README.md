@@ -1,12 +1,6 @@
 # Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation
 
-Code for the paper: **Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation** 
-
-Student ID：11479116
-
-
-Course Code：LELA70502
-
+Code for the paper: **Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation** (2025).
 
 ## Overview
 
@@ -53,7 +47,7 @@ Run the extraction scripts in `src/` against your local copy of the EMMT corpus,
 
 ```bash
 # Word-level total fixation duration from raw EMMT gaze files
-python src/extract_fixation_duration.py \
+python extract_fixation_duration.py \
   --read_dir      /path/to/emmt/preprocessed-data/gaze/Read \
   --translate_dir /path/to/emmt/preprocessed-data/gaze/Translate \
   --sentences     /path/to/emmt/probes/Sentences.csv \
@@ -62,17 +56,17 @@ python src/extract_fixation_duration.py \
 # Aligned translation surprisal (c_nmt)
 # Uses Helsinki-NLP/opus-mt-en-cs (Tiedemann & Thottingal, 2020);
 # model is downloaded automatically on first run.
-python src/extract_nmt_surprisal_soft.py \
+python extract_nmt_surprisal_soft.py \
   --sentences /path/to/emmt/probes/Sentences.csv \
   --output    nmt_surprisal_soft_word.csv
 
 # Monolingual surprisal (c_mono), uses GPT-2
-python src/extract_monolingual_surprisal.py \
+python extract_monolingual_surprisal.py \
   --sentences /path/to/emmt/probes/Sentences.csv \
   --output    monolingual_surprisal_word.csv
 
 # Optional: cross-attention alignment heatmap
-python src/plot_alignment.py \
+python plot_alignment.py \
   --sentence "A man is blowing into a plastic ball." \
   --output   alignment_map.pdf
 ```
@@ -93,13 +87,15 @@ Figures are saved to the `figures/` directory.
 
 ## Repository Structure
 
-| Path | Description |
-|------|-------------|
-| `src/extract_fixation_duration.py` | Raw EMMT gaze files → word-level TFD |
-| `src/extract_nmt_surprisal_soft.py` | Aligned translation surprisal via soft cross-attention alignment |
-| `src/extract_monolingual_surprisal.py` | GPT-2 monolingual surprisal |
-| `src/plot_alignment.py` | Cross-attention alignment visualisation |
-| `result-analysis.ipynb` | Mixed-effects models and cross-validation (R kernel) |
+```
+├── extract_fixation_duration.py      # raw EMMT gaze files → word-level TFD
+├── extract_nmt_surprisal_soft.py     # aligned translation surprisal (c_nmt)
+├── extract_monolingual_surprisal.py  # GPT-2 monolingual surprisal (c_mono)
+├── plot_alignment.py                 # cross-attention alignment heatmap
+├── result-analysis.ipynb             # mixed-effects models and CV (R kernel)
+├── requirements.txt
+└── .gitignore
+```
 
 ## References
 
