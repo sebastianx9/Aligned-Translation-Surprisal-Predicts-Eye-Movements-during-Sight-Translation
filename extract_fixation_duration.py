@@ -8,16 +8,10 @@ metric-compatible substitute for Free Sans Bold, fontsize 28).
 Output: one row per participant x sentence x stage x word
 """
 
+import argparse
 import os
 import csv
 from PIL import ImageFont
-
-# ── Paths ──────────────────────────────────────────────────────────────────
-READ_DIR      = "/Users/sebastianx/eyetracked-multi-modal-translation/preprocessed-data/gaze/Read"
-TRANSLATE_DIR = "/Users/sebastianx/eyetracked-multi-modal-translation/preprocessed-data/gaze/Translate"
-SENTENCES_CSV = "/Users/sebastianx/eyetracked-multi-modal-translation/probes/Sentences.csv"
-OUTPUT_CSV    = "/Users/sebastianx/Downloads/fixation_durations_word.csv"
-# ───────────────────────────────────────────────────────────────────────────
 
 # Display parameters from experiment script
 TEXT_CENTER_X = 620
@@ -246,20 +240,31 @@ def remove_outliers(results, sd_threshold=2.5):
 
 
 def main():
-    for d in (READ_DIR, TRANSLATE_DIR):
+    parser = argparse.ArgumentParser(description="Extract word-level TFD from EMMT gaze files.")
+    parser.add_argument("--read_dir",      required=True,
+                        help="Path to EMMT preprocessed-data/gaze/Read directory")
+    parser.add_argument("--translate_dir", required=True,
+                        help="Path to EMMT preprocessed-data/gaze/Translate directory")
+    parser.add_argument("--sentences",     required=True,
+                        help="Path to Sentences.csv from the EMMT corpus")
+    parser.add_argument("--output",        required=True,
+                        help="Output CSV path")
+    args = parser.parse_args()
+
+    for d in (args.read_dir, args.translate_dir):
         if not os.path.isdir(d):
             print(f"Directory not found: {d}")
             return
 
     print("Loading sentences...")
-    sentences = load_sentences(SENTENCES_CSV)
+    sentences = load_sentences(args.sentences)
     print(f"  {len(sentences)} sentences loaded.")
 
     results = []
     print("Processing Read stage...")
-    process_directory(READ_DIR,      "read",      sentences, results)
+    process_directory(args.read_dir,      "read",      sentences, results)
     print("Processing Translate stage...")
-    process_directory(TRANSLATE_DIR, "translate", sentences, results)
+    process_directory(args.translate_dir, "translate", sentences, results)
 
     print("Removing outliers (>2.5 SD from participant mean per stage)...")
     results = remove_outliers(results)
@@ -267,15 +272,15 @@ def main():
     fields = ["participant", "order", "sentence_id", "ambiguity", "congruency",
               "stage", "word_index", "word", "total_fixation_duration_ms"]
 
-    with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
+    with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(results)
 
     read_n  = sum(1 for r in results if r["stage"] == "read")
     trans_n = sum(1 for r in results if r["stage"] == "translate")
-    print(f"\nDone.  READ: {read_n} word-level rows,  TRANSLATE: {trans_n} word-level rows")
-    print(f"Output: {OUTPUT_CSV}")
+    print(f"\nDone.  READ: {read_n} rows,  TRANSLATE: {trans_n} rows")
+    print(f"Output: {args.output}")
 
 
 if __name__ == "__main__":

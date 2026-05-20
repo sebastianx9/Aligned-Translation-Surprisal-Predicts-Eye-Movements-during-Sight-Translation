@@ -1,7 +1,9 @@
-
-#Generate cross-attention alignment heatmap for paper figure.
-#Source: Helsinki-NLP/opus-mt-en-cs  (EN → CS)
-#Figure: word-level attention weights (CS tokens × EN words)
+"""
+Generate cross-attention alignment heatmap for paper figure.
+Source: Helsinki-NLP/opus-mt-en-cs  (EN → CS)
+Figure: word-level attention weights (CS tokens × EN words),
+        argmax alignment highlighted with red border.
+"""
 
 import torch
 import numpy as np
