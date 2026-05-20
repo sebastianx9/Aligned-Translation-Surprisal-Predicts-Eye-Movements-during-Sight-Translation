@@ -1,6 +1,11 @@
 # Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation
 
-Code for the paper: **Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation** (2025).
+Code for the paper: **Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation** .
+
+Course Code: LELA70502
+
+Student ID: 11479116
+
 
 ## Overview
 
