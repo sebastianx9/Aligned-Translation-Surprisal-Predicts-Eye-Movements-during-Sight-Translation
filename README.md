@@ -1,11 +1,20 @@
 # Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation
 
 Code for the paper: **Aligned Translation Surprisal Predicts Source-Text Eye Movements During Sight Translation** 
-\\Student ID：11479116
-\\Course Code：LELA70502
-\\University of Manchester
-\\School of Arts, Languages and Cultures
-\\Supervisor: Dr. Colin Bannard
+
+Student ID：11479116
+
+
+Course Code：LELA70502
+
+
+University of Manchester
+
+
+School of Arts, Languages and Cultures
+
+
+Supervisor: Dr. Colin Bannard
 
 ## Overview
 
