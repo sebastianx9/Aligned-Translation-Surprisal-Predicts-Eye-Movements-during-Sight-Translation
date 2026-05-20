@@ -88,7 +88,6 @@ Open the notebook, set `DATA_DIR` to the folder containing the CSV files from St
 jupyter notebook result-analysis.ipynb
 ```
 
-Figures are saved to the `figures/` directory.
 
 ## Repository Structure
 
