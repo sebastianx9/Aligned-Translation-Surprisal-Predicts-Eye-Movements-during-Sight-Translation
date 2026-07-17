@@ -1,18 +1,16 @@
-# ── RQ3: GD vs RRT LOO-CV predictive gains (vertical dot-and-error-bar) ────
-# Reconstructed from reported LOO-CV values (main.tex). Vertical orientation:
-# outcome (GD, RRT) on x, Delta llh on y. Blue = c_nmt, green = c_mono;
-# filled = p < .05, open = p >= .05. Error bars are +-1.96 SE.
+# ── RQ3: GD vs RRT kfold predictive gains (vertical dot-and-error-bar) ─────
+# Values read DIRECTLY from rq3_kfold_elpd.rds (no hardcoding — a stale
+# hardcoded copy of this script silently re-plotted pre-bugfix numbers once).
+# Blue = c_nmt, orange = c_mono; filled = p < .05, open = p >= .05.
+# Error bars are +-1.96 sentence-clustered SE.
 
 OUT_DIR <- "/Users/sebastianx/Dissertation Writeup/MSc_and_BEng_Dissertation_Template_the_University_of_Manchester_EEE/images"
 suppressMessages({library(dplyr); library(ggplot2)})
 
-df <- tibble::tribble(
-  ~predictor, ~outcome, ~dllh,   ~se,    ~sig,
-  "c[nmt]",   "GD",      0.593,  1.88,   FALSE,
-  "c[nmt]",   "RRT",     8.460,  4.54,   TRUE,
-  "c[mono]",  "GD",      7.361,  4.18,   TRUE,
-  "c[mono]",  "RRT",     1.245,  1.24,   FALSE
-) %>%
+res <- readRDS("/Users/sebastianx/Dissertation RQ3/rq3_kfold_elpd.rds")
+df <- res %>%
+  transmute(predictor = ifelse(predictor=="c_nmt","c[nmt]","c[mono]"),
+            outcome, dllh = elpd_diff, se = se_cluster, sig = p < .05) %>%
   mutate(outcome = factor(outcome, levels = c("GD", "RRT")),
          predictor = factor(predictor, levels = c("c[nmt]", "c[mono]")),
          lo = dllh - 1.96 * se, hi = dllh + 1.96 * se)
