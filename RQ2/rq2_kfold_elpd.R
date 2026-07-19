@@ -1,12 +1,14 @@
-# ── RQ2 nested ladder, Bayesian elpd version (PROTOTYPE) ─────────────────────
+#!/usr/bin/env Rscript
+
+# ── RQ2 nested ladder, Bayesian elpd version ─────────────────────────────────
 #
 # Same three nested comparisons as rq2_nested_ladder.R, but scored with
 # brms + kfold() instead of lmer + plug-in Gaussian density.
 #
-#   M1 = controls + cond + c_mono + cond:c_mono
+#   M1 = stage-varying controls + c_mono + cond:c_mono
 #   M2 = M1 + c_nmt                  -> c_nmt beyond c_mono
 #   M3 = M2 + cond:c_nmt             -> c_nmt's effect is task-modulated
-#   N1 = controls + cond + c_nmt + cond:c_nmt   (N2 == M3)
+#   N1 = stage-varying controls + c_nmt + cond:c_nmt   (N2 == M3)
 #
 # Three deliberate choices, each stated in Methods:
 #
@@ -31,11 +33,22 @@
 #    the default pointwise computation, which assumes independent observations."
 # ─────────────────────────────────────────────────────────────────────────────
 
-DATA_DIR <- "/Users/sebastianx/Dissertation_Data"
-OUT      <- "/Users/sebastianx/Dissertation RQ2"
 suppressMessages({library(brms); library(dplyr)})
 
 options(mc.cores = 4)
+
+args <- commandArgs(trailingOnly = TRUE)
+get_arg <- function(name, default) {
+  hit <- grep(paste0("^", name, "="), args, value = TRUE)
+  if (!length(hit)) return(default)
+  sub(paste0("^", name, "="), "", hit[[1]])
+}
+DATA_DIR <- normalizePath(
+  get_arg("--data-dir", Sys.getenv("DISSERTATION_DATA_DIR", ".")),
+  mustWork = TRUE
+)
+OUT <- get_arg("--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", DATA_DIR))
+dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
 
 # ── Data prep (identical to rq2_nested_ladder.R / rq2_brm_joint.R) ───────────
 fix  <- read.csv(file.path(DATA_DIR, "fixation_durations_word.csv"),    stringsAsFactors=FALSE)
@@ -82,14 +95,16 @@ cat("\n")
 
 # ── Models ───────────────────────────────────────────────────────────────────
 RE   <- "(1|participant) + (1|sentence_id)"
-CTRL <- "c_wlen + c_wpos + c_freq + ambiguity"
+# All lexical/positional controls are allowed to vary by stage in every model,
+# matching the pooled specification reported in the dissertation.
+CTRL <- "cond * (c_wlen + c_wpos + c_freq + ambiguity)"
 f <- function(rhs) as.formula(paste("log_tfd ~", CTRL, "+", rhs, "+", RE))
 
 forms <- list(
-  M1 = f("cond + c_mono + cond:c_mono"),
-  M2 = f("cond + c_mono + cond:c_mono + c_nmt"),
-  M3 = f("cond + c_mono + cond:c_mono + c_nmt + cond:c_nmt"),
-  N1 = f("cond + c_nmt + cond:c_nmt")
+  M1 = f("c_mono + cond:c_mono"),
+  M2 = f("c_mono + cond:c_mono + c_nmt"),
+  M3 = f("c_mono + cond:c_mono + c_nmt + cond:c_nmt"),
+  N1 = f("c_nmt + cond:c_nmt")
 )
 
 priors <- c(prior(normal(0, 1), class=b),
@@ -103,7 +118,9 @@ dir.create(CACHE, showWarnings=FALSE)
 ptw <- list()   # pointwise elpd_kfold, one vector of length N per model
 kfs <- list()   # full kfold objects, kept for the official loo_compare() cross-check
 for (nm in names(forms)) {
-  path <- file.path(CACHE, sprintf("kfold_%s.rds", nm))
+  # v2 caches are deliberately separate from the earlier specification in
+  # which control slopes were constrained to be equal across stages.
+  path <- file.path(CACHE, sprintf("kfold_v2_%s.rds", nm))
   if (file.exists(path)) {
     cat(sprintf("[%s] loading cached kfold\n", nm))
     kf <- readRDS(path)

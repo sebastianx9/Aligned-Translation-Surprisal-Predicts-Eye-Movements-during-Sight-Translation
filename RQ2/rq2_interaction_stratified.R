@@ -1,5 +1,5 @@
 # Stratified evaluation of the condition:c_nmt interaction gain.
-# The pooled M3-M2 held-out gain dilutes a translation-specific interaction over
+# The pooled M3-M2 held-out gain dilutes a translation-related stage interaction over
 # the mostly-reading sample (see "Attenuation of interaction gains" in Methods).
 # No refitting: models are fit on the pooled data; we only re-aggregate the
 # already-computed pointwise elpd differences over the translation held-out rows.

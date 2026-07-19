@@ -1,11 +1,25 @@
-# RQ3 brms kfold elpd — c_nmt / c_mono on GD and RRT (translate stage).
+#!/usr/bin/env Rscript
+
+# RQ3 brms kfold elpd — c_nmt / c_mono on FFD, GD, and conditional RRT.
 # Bayesian replacement for the lmer two-stage LOO-CV. Same convention as
 # rq1_kfold_elpd.R: 10-fold sentence-grouped elpd, sentence-clustered SE,
 # sentence-level sign-flip permutation. Fixes the two issues in the old lmer
 # script (shared sigma(m_base); it also used the un-normalised attention file,
 # irrelevant here since only c_nmt/c_mono are reported).
-DATA_DIR <- "/Users/sebastianx/Dissertation_Data"; OUT <- "/Users/sebastianx/Dissertation RQ3"
 suppressMessages({library(brms); library(dplyr)}); options(mc.cores = 4)
+
+args <- commandArgs(trailingOnly = TRUE)
+get_arg <- function(name, default) {
+  hit <- grep(paste0("^", name, "="), args, value = TRUE)
+  if (!length(hit)) return(default)
+  sub(paste0("^", name, "="), "", hit[[1]])
+}
+DATA_DIR <- normalizePath(
+  get_arg("--data-dir", Sys.getenv("DISSERTATION_DATA_DIR", ".")),
+  mustWork = TRUE
+)
+OUT <- get_arg("--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", DATA_DIR))
+dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
 
 em   <- read.csv(file.path(DATA_DIR,"eye_measures_word.csv"),          stringsAsFactors=FALSE)
 nmt  <- read.csv(file.path(DATA_DIR,"nmt_surprisal_soft_word.csv"),    stringsAsFactors=FALSE)
@@ -25,9 +39,11 @@ base_df <- em %>% filter(stage=="translate") %>% left_join(pred,by=c("sentence_i
 z<-function(x)(x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)
 base_df <- base_df %>% mutate(c_nmt=z(nmt_surprisal),c_mono=z(mono_surprisal),
                               c_wlen=z(word_length),c_wpos=z(word_position),c_freq=z(log10_freq))
+df_ffd <- base_df %>% filter(!is.na(ffd_ms), ffd_ms > 0) %>% mutate(log_ffd = log(ffd_ms))
 df_gd  <- base_df %>% filter(!is.na(gd_ms),  gd_ms  > 0) %>% mutate(log_gd  = log(gd_ms))
 df_rrt <- base_df %>% filter(regress_in==1, rrt_ms > 0)  %>% mutate(log_rrt = log(rrt_ms))
-cat(sprintf("GD n=%d  RRT n=%d\n", nrow(df_gd), nrow(df_rrt)))
+cat(sprintf("FFD n=%d  GD n=%d  conditional RRT n=%d\n",
+            nrow(df_ffd), nrow(df_gd), nrow(df_rrt)))
 
 pri<-c(prior(normal(0,1),class=b),prior(normal(6,1),class=Intercept),prior(exponential(1),class=sd),prior(exponential(1),class=sigma))
 CACHE<-file.path(DATA_DIR,"brm_cache"); CTRL<-"c_wlen+c_wpos+c_freq+ambiguity"; RE<-"(1|participant)+(1|sentence_id)"
@@ -46,9 +62,11 @@ run_outcome <- function(df, y, tag) {
     di<-pt-pb; ds<-tapply(di,sid,sum); res[k,3:5]<-c(sum(di),sd(ds)*sqrt(S),sfp(ds))}
   res
 }
+r_ffd <- run_outcome(df_ffd, "log_ffd", "FFD")
 r_gd  <- run_outcome(df_gd,  "log_gd",  "GD")
 r_rrt <- run_outcome(df_rrt, "log_rrt", "RRT")
-res <- rbind(r_gd, r_rrt)
+res <- rbind(r_ffd, r_gd, r_rrt)
 saveRDS(res, file.path(OUT,"rq3_kfold_elpd.rds"))
-cat("=== RQ3 brms kfold elpd (GD, RRT) ===\n"); print(format(res, digits=3))
+cat("=== RQ3 brms kfold elpd (FFD, GD, conditional RRT) ===\n")
+print(format(res, digits=3))
 cat("DONE\n")

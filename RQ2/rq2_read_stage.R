@@ -9,7 +9,7 @@
 # If neither:
 #   → simply underpowered / features not useful in this dataset
 # If c_nmt also predicts reading-aloud:
-#   → c_nmt captures general difficulty, not translation-specific
+#   → this would weaken a translation-related stage interpretation
 # ──────────────────────────────────────────────────────────────────────────────
 
 DATA_DIR <- "/Users/sebastianx/Dissertation_Data"

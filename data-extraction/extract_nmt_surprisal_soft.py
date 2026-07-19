@@ -16,6 +16,10 @@ import numpy as np
 from transformers import MarianMTModel, MarianTokenizer
 
 
+DEFAULT_MODEL = "Helsinki-NLP/opus-mt-en-cs"
+DEFAULT_REVISION = "2820c6a540ddc2b7c4ea4c95c39b3150bd3ac27e"
+
+
 def load_sentences(path):
     sentences = {}
     with open(path, newline="", encoding="utf-8") as f:
@@ -101,14 +105,20 @@ def main():
                         help="Path to Sentences.csv from the EMMT corpus")
     parser.add_argument("--output", required=True,
                         help="Output CSV path")
-    parser.add_argument("--model", default="Helsinki-NLP/opus-mt-en-cs",
-                        help="HuggingFace model name (default: Helsinki-NLP/opus-mt-en-cs)")
+    parser.add_argument("--model", default=DEFAULT_MODEL,
+                        help=f"Hugging Face model name (default: {DEFAULT_MODEL})")
+    parser.add_argument("--revision", default=DEFAULT_REVISION,
+                        help="Pinned Hugging Face model revision")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Loading {args.model} on {device} …")
-    tokenizer = MarianTokenizer.from_pretrained(args.model)
-    model     = MarianMTModel.from_pretrained(args.model, output_attentions=True)
+    tokenizer = MarianTokenizer.from_pretrained(
+        args.model, revision=args.revision
+    )
+    model = MarianMTModel.from_pretrained(
+        args.model, revision=args.revision, output_attentions=True
+    )
     model.eval()
     model.to(device)
 

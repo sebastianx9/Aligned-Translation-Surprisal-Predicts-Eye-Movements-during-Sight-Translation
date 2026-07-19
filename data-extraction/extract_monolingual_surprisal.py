@@ -21,6 +21,10 @@ import torch
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
 
+DEFAULT_MODEL = "gpt2"
+DEFAULT_REVISION = "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+
+
 def load_sentences(path):
     sentences = {}
     with open(path, newline="", encoding="utf-8") as f:
@@ -94,11 +98,19 @@ def main():
                         help="Path to Sentences.csv from the EMMT corpus")
     parser.add_argument("--output", required=True,
                         help="Output CSV path")
+    parser.add_argument("--model", default=DEFAULT_MODEL,
+                        help=f"Hugging Face model name (default: {DEFAULT_MODEL})")
+    parser.add_argument("--revision", default=DEFAULT_REVISION,
+                        help="Pinned Hugging Face model revision")
     args = parser.parse_args()
 
-    print("Loading GPT-2 …")
-    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
-    model     = GPT2LMHeadModel.from_pretrained("gpt2")
+    print(f"Loading {args.model} at revision {args.revision} …")
+    tokenizer = GPT2TokenizerFast.from_pretrained(
+        args.model, revision=args.revision
+    )
+    model = GPT2LMHeadModel.from_pretrained(
+        args.model, revision=args.revision
+    )
     model.eval()
     print("  Model loaded.\n")
 
