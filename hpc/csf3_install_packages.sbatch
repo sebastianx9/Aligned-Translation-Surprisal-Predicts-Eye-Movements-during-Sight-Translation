@@ -9,7 +9,7 @@
 
 set -euo pipefail
 module purge
-module load apps/R/4.4.1
+module load apps/gcc/R/4.4.1
 
 jobscript_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "${jobscript_dir}/.." && pwd)"

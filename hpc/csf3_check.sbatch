@@ -9,7 +9,7 @@
 
 set -euo pipefail
 module purge
-module load apps/R/4.4.1
+module load apps/gcc/R/4.4.1
 
 : "${DISSERTATION_DATA_DIR:?Set DISSERTATION_DATA_DIR before sbatch}"
 export R_LIBS_USER="${R_LIBS_USER:-${HOME}/R/csf3-4.4}"

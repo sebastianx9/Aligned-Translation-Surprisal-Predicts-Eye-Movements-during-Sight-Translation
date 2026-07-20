@@ -9,7 +9,7 @@
 
 set -euo pipefail
 module purge
-module load apps/R/4.4.1
+module load apps/gcc/R/4.4.1
 
 : "${ANALYSIS:?Set ANALYSIS before sbatch}"
 : "${DISSERTATION_DATA_DIR:?Set DISSERTATION_DATA_DIR before sbatch}"
