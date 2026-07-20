@@ -97,7 +97,7 @@ model <- brm(
   formula, data = data, prior = priors,
   control = list(adapt_delta = 0.99, max_treedepth = 15),
   chains = 4, iter = 4000, warmup = 2000,
-  save_pars = save_pars(all = TRUE), silent = 2, refresh = 0
+  seed = 42, save_pars = save_pars(all = TRUE), silent = 2, refresh = 0
 )
 dir.create(path("brm_cache"), showWarnings = FALSE)
 cache_name <- if (include_stoplight) {

@@ -29,6 +29,12 @@ and order.
 
 ## Headline results
 
+> **Reanalysis in progress.** The numerical values in this section were
+> obtained before the July 2026 correction to EMMT timestamp parsing and are
+> retained only as a record of the previous analysis. The corrected Bayesian
+> models and cross-validation comparisons are being regenerated on the CSF;
+> these values must not be treated as final.
+
 All predictive comparisons use the same sentence-grouped 10-fold allocation,
 sentence-clustered standard errors, and sentence-level sign-flip tests.
 
@@ -60,6 +66,9 @@ equivalence tests.
 The EMMT recordings are available from the
 [UFAL EMMT repository](https://github.com/ufal/eyetracked-multi-modal-translation)
 and are not redistributed here. SUBTLEX-US supplies the frequency norms.
+The corpus contains 43 participants, but the released gaze files for P38
+contain column headers only and no gaze samples. The eye-movement analyses
+therefore use gaze observations from the remaining 42 participants.
 Expected analysis inputs are:
 
 - `fixation_durations_word.csv`
@@ -70,9 +79,8 @@ Expected analysis inputs are:
 - `attention_features_6_norm.csv`
 - `subtlex_us.csv`
 
-Set `DATA_DIR` near the top of the R scripts, or pass `--data-dir=PATH` to the
-newer command-line scripts. Model caches and derived CSVs are deliberately not
-tracked.
+The main R scripts accept `--data-dir=PATH` and `--output-dir=PATH`. Model
+caches and derived CSVs are deliberately not tracked.
 
 ## Reproducing feature extraction
 
@@ -80,6 +88,18 @@ tracked.
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
+python data-extraction/extract_fixation_duration.py \
+  --read_dir /path/to/EMMT/preprocessed-data/gaze/Read \
+  --translate_dir /path/to/EMMT/preprocessed-data/gaze/Translate \
+  --sentences /path/to/EMMT/probes/Sentences.csv \
+  --output /path/to/data/fixation_durations_word.csv
+
+python data-extraction/extract_eye_measures.py \
+  --read_dir /path/to/EMMT/preprocessed-data/gaze/Read \
+  --translate_dir /path/to/EMMT/preprocessed-data/gaze/Translate \
+  --sentences /path/to/EMMT/probes/Sentences.csv \
+  --output /path/to/data/eye_measures_word.csv
 
 python data-extraction/extract_nmt_surprisal_soft.py \
   --sentences /path/to/EMMT/probes/Sentences.csv \
@@ -104,6 +124,17 @@ The monolingual extractor aligns GPT-2 tokens through the leading-space BPE
 marker (`Ġ`). This replaces the earlier offset-based implementation, which
 could assign a token spanning a leading space to the preceding word.
 
+The EMMT gaze extractors split timestamps on colons rather than fixed character
+positions. This is required because hour, minute, and second fields are not
+consistently zero-padded (for example, `9:18:51.2205` and `12:9:28.1865`).
+Fixation bouts shorter than 20 ms are removed before word-level aggregation in
+both eye-movement extractors. The two shared files marked with congruency `X`
+(S031 and S032) fall outside the corpus's documented 2-by-3 experimental
+condition set and are excluded from the derived analysis files. The EMMT paper
+does not define `X`; these items are therefore described neutrally as
+additional shared items, not as practice trials. The paper separately reports
+a four-item practice round.
+
 ## Main analysis scripts
 
 ```text
@@ -113,6 +144,7 @@ RQ1/rq1_mass_stoplight_robustness.R   alignment-mass and stoplight checks
 RQ1/rq_locus_kfold.R                  current/preceding/following c_mono check
 
 RQ2/rq2_joint_maximal.R               joint stage-interaction model
+RQ2/rq2_beyond_kfold.R                c_nmt beyond controls + c_mono
 RQ2/rq2_kfold_elpd.R                  nested predictive comparisons
 RQ2/rq2_stoplight_importance.R        sequential stoplight sensitivity check
 
@@ -136,6 +168,40 @@ The recorded environment was:
 Random seed 42 fixes the primary grouped folds and sign-flip tests. The main
 predictor families use 10,000 sign flips; the direct NMT--monolingual contrast
 and the alignment-mass and *stoplight* checks use 1,000.
+
+### CSF3 / Slurm
+
+The supplied jobs use the University of Manchester CSF3 R 4.4.1 module and
+four CPU cores for each full analysis. Run the environment check before
+submitting the long jobs:
+
+```bash
+export DISSERTATION_DATA_DIR=/path/to/Dissertation_Data
+export DISSERTATION_OUTPUT_DIR=/path/to/Dissertation_Data/results
+
+sbatch hpc/csf3_check.sbatch
+squeue -u "$USER"
+```
+
+The check verifies the corrected sample counts and performs a small Stan fit.
+If it reports missing packages, install them on a compute node and rerun the
+check:
+
+```bash
+sbatch hpc/csf3_install_packages.sbatch
+```
+
+After the check succeeds, submit the core coefficient and CV jobs:
+
+```bash
+bash hpc/submit_core_jobs.sh \
+  "$DISSERTATION_DATA_DIR" "$DISSERTATION_OUTPUT_DIR"
+```
+
+The helper keeps dependent jobs in the correct order: the direct RQ1 contrast,
+the alignment-mass check, and the translation-stage RQ2 nested comparison reuse
+the RQ1 fold allocation and caches. Each job log records the R session and
+SHA-256 hashes of the main inputs.
 
 ## References
 

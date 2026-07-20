@@ -129,9 +129,10 @@ for (nm in names(forms)) {
     t0 <- proc.time()
     m <- brm(forms[[nm]], data=df, prior=priors,
              control=list(adapt_delta=0.95, max_treedepth=12),
-             chains=4, iter=2000, warmup=1000, silent=2, refresh=0)
+             chains=4, iter=2000, warmup=1000, seed=42,
+             silent=2, refresh=0)
     kf <- kfold(m, folds = fold_vec, chains = 4, iter = 2000, warmup = 1000,
-                silent = 2, refresh = 0)
+                seed = 42, silent = 2, refresh = 0)
     saveRDS(kf, path)
     cat(sprintf("[%s] done in %.0f min\n", nm, (proc.time()-t0)["elapsed"]/60))
   }

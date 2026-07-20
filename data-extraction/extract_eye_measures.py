@@ -17,16 +17,11 @@ Same word x-position mapping as extract_fixation_duration.py.
 Output: one row per participant x sentence x stage x word (fixated words only).
 """
 
+import argparse
 import os
 import csv
 from PIL import ImageFont
-
-# ── Paths ──────────────────────────────────────────────────────────────────
-READ_DIR      = "/Users/sebastianx/eyetracked-multi-modal-translation/preprocessed-data/gaze/Read"
-TRANSLATE_DIR = "/Users/sebastianx/eyetracked-multi-modal-translation/preprocessed-data/gaze/Translate"
-SENTENCES_CSV = "/Users/sebastianx/eyetracked-multi-modal-translation/probes/Sentences.csv"
-OUTPUT_CSV    = "/Users/sebastianx/Dissertation_Data/eye_measures_word.csv"
-# ───────────────────────────────────────────────────────────────────────────
+from timestamp_utils import ts_to_seconds
 
 TEXT_CENTER_X = 620
 TEXT_Y        = 200
@@ -82,13 +77,6 @@ def x_to_word_index(x, ranges):
             return i
     centers = [(x0 + x1) / 2 for x0, x1, _ in ranges]
     return min(range(len(centers)), key=lambda i: abs(centers[i] - x))
-
-
-def ts_to_seconds(ts_str):
-    s = ts_str.strip()
-    h, m, rest = s[0:2], s[3:5], s[6:]
-    sec, frac = rest.split(".")
-    return int(h) * 3600 + int(m) * 60 + int(sec) + int(frac) / (10 ** len(frac))
 
 
 def extract_bouts(filepath, words):
@@ -237,6 +225,8 @@ def process_directory(directory, stage_label, sentences, results):
         if parts is None:
             continue
         participant, order, sentence_id, ambiguity, congruency = parts
+        if congruency == "X":
+            continue  # shared non-experimental items S031 and S032
         words = sentences.get(sentence_id)
         if words is None:
             continue
@@ -281,16 +271,28 @@ def remove_outliers(results, sd_threshold=2.5):
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Extract word-level eye-movement measures from EMMT gaze files."
+    )
+    parser.add_argument("--read_dir", required=True,
+                        help="Path to EMMT preprocessed-data/gaze/Read directory")
+    parser.add_argument("--translate_dir", required=True,
+                        help="Path to EMMT preprocessed-data/gaze/Translate directory")
+    parser.add_argument("--sentences", required=True,
+                        help="Path to Sentences.csv from the EMMT corpus")
+    parser.add_argument("--output", required=True, help="Output CSV path")
+    args = parser.parse_args()
+
     print("Loading sentences...")
-    sentences = load_sentences(SENTENCES_CSV)
+    sentences = load_sentences(args.sentences)
     print(f"  {len(sentences)} sentences.")
 
     results = []
     print("Processing Read...")
-    process_directory(READ_DIR,      "read",      sentences, results)
+    process_directory(args.read_dir,      "read",      sentences, results)
     print(f"  {sum(1 for r in results if r['stage']=='read')} rows")
     print("Processing Translate...")
-    process_directory(TRANSLATE_DIR, "translate", sentences, results)
+    process_directory(args.translate_dir, "translate", sentences, results)
     print(f"  {sum(1 for r in results if r['stage']=='translate')} rows")
 
     print("Removing outliers (2.5 SD on TFD)...")
@@ -300,7 +302,7 @@ def main():
               "stage", "word_index", "word",
               "tfd_ms", "ffd_ms", "gd_ms", "rrt_ms", "n_fix", "regress_in"]
 
-    with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
+    with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(results)
@@ -308,7 +310,7 @@ def main():
     read_n  = sum(1 for r in results if r["stage"] == "read")
     trans_n = sum(1 for r in results if r["stage"] == "translate")
     print(f"\nDone.  Read: {read_n}  Translate: {trans_n}")
-    print(f"Output: {OUTPUT_CSV}")
+    print(f"Output: {args.output}")
 
 
 if __name__ == "__main__":

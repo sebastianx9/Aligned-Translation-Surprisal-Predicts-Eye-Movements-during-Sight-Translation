@@ -1,8 +1,20 @@
-# RQ1 c_nmt coefficient, MAXIMAL random effects (item 5, symmetric with RQ2).
+#!/usr/bin/env Rscript
+
+# RQ1 c_nmt coefficient, random slopes maximal for the focal predictor.
 # RE: (1 + c_nmt | participant) + (1 + c_nmt | sentence_id).
 # Reports convergence diagnostics + RE SDs so degeneracy is visible.
-DATA_DIR <- "/Users/sebastianx/Dissertation_Data"
 suppressMessages({library(brms); library(dplyr)}); options(mc.cores=4)
+
+args <- commandArgs(trailingOnly = TRUE)
+get_arg <- function(name, default) {
+  hit <- grep(paste0("^", name, "="), args, value = TRUE)
+  if (!length(hit)) return(default)
+  sub(paste0("^", name, "="), "", hit[[1]])
+}
+DATA_DIR <- normalizePath(
+  get_arg("--data-dir", Sys.getenv("DISSERTATION_DATA_DIR", ".")),
+  mustWork = TRUE
+)
 fix  <- read.csv(file.path(DATA_DIR,"fixation_durations_word.csv"),stringsAsFactors=FALSE)
 nmt  <- read.csv(file.path(DATA_DIR,"nmt_surprisal_soft_word.csv"),stringsAsFactors=FALSE)
 freq <- read.table(file.path(DATA_DIR,"subtlex_us.csv"),sep="\t",header=TRUE,stringsAsFactors=FALSE,quote="") %>%
@@ -24,7 +36,8 @@ pri<-c(prior(normal(0,1),class=b),prior(normal(6,1),class=Intercept),
 m<-brm(log_tfd~c_wlen+c_wpos+c_freq+ambiguity+c_nmt+
          (1+c_nmt|participant)+(1+c_nmt|sentence_id),
        data=df,prior=pri,control=list(adapt_delta=0.99,max_treedepth=14),
-       chains=4,iter=4000,warmup=2000,silent=2,refresh=0)
+       chains=4,iter=4000,warmup=2000,seed=42,silent=2,refresh=0)
+dir.create(file.path(DATA_DIR,"brm_cache"), showWarnings=FALSE)
 saveRDS(m,file.path(DATA_DIR,"brm_cache","rq1_coef_maximal.rds"))
 cat("\n=== fixef (MAXIMAL RE) ===\n"); print(round(fixef(m),4))
 cat("\n=== RE SDs / correlations ===\n"); print(VarCorr(m))

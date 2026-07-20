@@ -12,12 +12,14 @@ import argparse
 import os
 import csv
 from PIL import ImageFont
+from timestamp_utils import ts_to_seconds
 
 # Display parameters from experiment script
 TEXT_CENTER_X = 620
 TEXT_Y        = 200
 Y_TOLERANCE   = 60   # px: fixation must be within this range of TEXT_Y
 SPACE_WIDTH   = 8.0  # measured from Arial Bold 28px
+MIN_FIX_MS    = 20   # discard fixation bouts shorter than this
 
 # Load font for accurate word width measurement
 _font_candidates = [
@@ -82,14 +84,6 @@ def x_to_word_index(x, ranges):
     return min(range(len(centers)), key=lambda i: abs(centers[i] - x))
 
 
-def ts_to_seconds(ts_str):
-    """Convert 'HH:MM:SS.SSSS' to float seconds."""
-    s = ts_str.strip()
-    h, m, rest = s[0:2], s[3:5], s[6:]
-    sec, frac = rest.split(".")
-    return int(h) * 3600 + int(m) * 60 + int(sec) + int(frac) / (10 ** len(frac))
-
-
 def extract_word_fixations(filepath, words):
     """
     Return {word_index: total_fixation_ms} for one gaze CSV file.
@@ -152,6 +146,8 @@ def extract_word_fixations(filepath, words):
             return
         mean_x = sum(valid_x) / len(valid_x)
         duration_ms = ((bout_ts[-1] - bout_ts[0]) + sample_interval) * 1000
+        if duration_ms < MIN_FIX_MS:
+            return
         wi = x_to_word_index(mean_x, ranges)
         if wi >= 0:
             word_totals[wi] = word_totals.get(wi, 0.0) + duration_ms
@@ -190,14 +186,14 @@ def process_directory(directory, stage_label, sentences, results):
         if parts is None:
             continue
         participant, order, sentence_id, ambiguity, congruency = parts
+        if congruency == "X":
+            continue  # shared non-experimental items S031 and S032
         words = sentences.get(sentence_id)
         if words is None:
             continue
         fpath = os.path.join(directory, fname)
         word_totals = extract_word_fixations(fpath, words)
         for wi, dur in sorted(word_totals.items()):
-            if dur < 20:
-                continue
             results.append({
                 "participant":               participant,
                 "order":                     order,

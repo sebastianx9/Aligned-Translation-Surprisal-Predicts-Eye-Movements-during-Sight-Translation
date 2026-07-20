@@ -1,3 +1,5 @@
+#!/usr/bin/env Rscript
+
 # ── RQ1 brms kfold elpd — 7 predictors vs baseline, TRANSLATE stage ───────────
 # Bayesian replacement for the lmer 200-fold Table 3. Same convention as
 # rq2_kfold_elpd.R: sentence-grouped 10-fold (shared folds across all models),
@@ -5,10 +7,23 @@
 # sentence-level sign-flip permutation. Within-translate z-scoring.
 # lmer 200-fold values are preserved in memory / rq1_loo_authoritative.rds.
 # ─────────────────────────────────────────────────────────────────────────────
-DATA_DIR <- "/Users/sebastianx/Dissertation_Data"
-OUT      <- "/Users/sebastianx/Dissertation RQ1"
 suppressMessages({library(brms); library(dplyr)})
 options(mc.cores = 4)
+
+args <- commandArgs(trailingOnly = TRUE)
+get_arg <- function(name, default) {
+  hit <- grep(paste0("^", name, "="), args, value = TRUE)
+  if (!length(hit)) return(default)
+  sub(paste0("^", name, "="), "", hit[[1]])
+}
+DATA_DIR <- normalizePath(
+  get_arg("--data-dir", Sys.getenv("DISSERTATION_DATA_DIR", ".")),
+  mustWork = TRUE
+)
+OUT <- get_arg(
+  "--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", DATA_DIR)
+)
+dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
 
 fix  <- read.csv(file.path(DATA_DIR, "fixation_durations_word.csv"),    stringsAsFactors=FALSE)
 nmt  <- read.csv(file.path(DATA_DIR, "nmt_surprisal_soft_word.csv"),    stringsAsFactors=FALSE)
@@ -65,8 +80,9 @@ fit_kfold <- function(name, formula) {
   if (file.exists(path)) { cat(sprintf("[%s] cached\n", name)); return(readRDS(path)) }
   cat(sprintf("[%s] fitting + 10-fold ...\n", name)); t0 <- proc.time()
   m  <- brm(formula, data=df, prior=priors, control=list(adapt_delta=0.95, max_treedepth=12),
-            chains=4, iter=2000, warmup=1000, silent=2, refresh=0)
-  kf <- kfold(m, folds=fold_vec, chains=4, iter=2000, warmup=1000, silent=2, refresh=0)
+            chains=4, iter=2000, warmup=1000, seed=42, silent=2, refresh=0)
+  kf <- kfold(m, folds=fold_vec, chains=4, iter=2000, warmup=1000,
+              seed=42, silent=2, refresh=0)
   saveRDS(kf, path); cat(sprintf("[%s] %.0f min\n", name, (proc.time()-t0)["elapsed"]/60)); kf
 }
 

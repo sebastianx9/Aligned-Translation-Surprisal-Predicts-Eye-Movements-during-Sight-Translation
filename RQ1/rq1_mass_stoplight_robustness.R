@@ -2,7 +2,7 @@
 
 # RQ1 sensitivity checks:
 #   (1) c_nmt beyond effective soft-alignment mass;
-#   (2) c_nmt with the three S003/stoplight observations restored.
+#   (2) c_nmt with the S003/stoplight observations restored.
 
 suppressPackageStartupMessages({library(brms); library(dplyr)})
 options(mc.cores = 4)
@@ -17,6 +17,10 @@ data_dir <- normalizePath(
   get_arg("--data-dir", Sys.getenv("DISSERTATION_DATA_DIR", ".")),
   mustWork = TRUE
 )
+output_dir <- get_arg(
+  "--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", data_dir)
+)
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 path <- function(...) file.path(data_dir, ...)
 
 fix <- read.csv(path("fixation_durations_word.csv"), stringsAsFactors = FALSE)
@@ -102,7 +106,13 @@ scale_data <- function(data) {
 }
 translate_clean <- scale_data(translate_clean)
 translate_all <- scale_data(translate_all)
-stopifnot(nrow(translate_clean) == 5149L, nrow(translate_all) == 5152L)
+stopifnot(
+  nrow(translate_clean) > 0L,
+  nrow(translate_all) >= nrow(translate_clean),
+  nrow(translate_all) - nrow(translate_clean) ==
+    sum(translate_all$sentence_id == "S003" &
+          translate_all$word_index == 3L)
+)
 
 priors <- c(
   prior(normal(0, 1), class = b),
@@ -133,11 +143,12 @@ fit_kfold <- function(name, formula, data, folds) {
   model <- brm(
     formula, data = data, prior = priors,
     control = list(adapt_delta = 0.95, max_treedepth = 12),
-    chains = 4, iter = 2000, warmup = 1000, silent = 2, refresh = 0
+    chains = 4, iter = 2000, warmup = 1000, seed = 42,
+    silent = 2, refresh = 0
   )
   result <- kfold(
     model, folds = folds, chains = 4, iter = 2000, warmup = 1000,
-    silent = 2, refresh = 0
+    seed = 42, silent = 2, refresh = 0
   )
   saveRDS(result, cache_path)
   result
@@ -203,7 +214,8 @@ result_stoplight <- compare_kfold(
 )
 
 results <- bind_rows(result_mass, result_stoplight)
-write.csv(results, path("rq1_mass_stoplight_predictive_results.csv"),
+write.csv(results,
+          file.path(output_dir, "rq1_mass_stoplight_predictive_results.csv"),
           row.names = FALSE)
 print(results)
 
@@ -215,7 +227,8 @@ fit_model <- function(name, formula, data) {
   model <- brm(
     formula, data = data, prior = c(priors, prior(lkj(2), class = cor)),
     control = list(adapt_delta = 0.99, max_treedepth = 14),
-    chains = 4, iter = 4000, warmup = 2000, silent = 2, refresh = 0
+    chains = 4, iter = 4000, warmup = 2000, seed = 42,
+    silent = 2, refresh = 0
   )
   saveRDS(model, cache_path)
   model
@@ -253,7 +266,7 @@ coefficient_results <- bind_rows(
 )
 write.csv(
   coefficient_results,
-  path("rq1_mass_stoplight_coefficient_results.csv"),
+  file.path(output_dir, "rq1_mass_stoplight_coefficient_results.csv"),
   row.names = FALSE
 )
 print(coefficient_results)

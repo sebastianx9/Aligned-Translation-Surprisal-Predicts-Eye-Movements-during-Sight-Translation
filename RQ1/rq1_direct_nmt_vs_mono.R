@@ -20,6 +20,10 @@ data_dir <- normalizePath(
   get_arg("--data-dir", Sys.getenv("DISSERTATION_DATA_DIR", ".")),
   mustWork = TRUE
 )
+output_dir <- get_arg(
+  "--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", data_dir)
+)
+dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 n_perm <- as.integer(get_arg("--n-perm", "1000"))
 seed <- as.integer(get_arg("--seed", "42"))
 stopifnot(n_perm > 0L, !is.na(seed))
@@ -29,10 +33,11 @@ mono_path <- path("monolingual_surprisal_word.csv")
 nmt_path <- path("nmt_surprisal_soft_word.csv")
 fix_path <- path("fixation_durations_word.csv")
 freq_path <- path("subtlex_us.csv")
+attn_path <- path("attention_features_6_norm.csv")
 nmt_cache_path <- path("brm_cache", "rq1kf_c_nmt.rds")
 mono_cache_path <- path("brm_cache", "rq1kf_c_mono.rds")
 
-required <- c(mono_path, nmt_path, fix_path, freq_path,
+required <- c(mono_path, nmt_path, fix_path, freq_path, attn_path,
               nmt_cache_path, mono_cache_path)
 missing_files <- required[!file.exists(required)]
 if (length(missing_files)) {
@@ -63,6 +68,7 @@ stopifnot(
 fix <- read.csv(fix_path, stringsAsFactors = FALSE)
 nmt <- read.csv(nmt_path, stringsAsFactors = FALSE)
 mono <- read.csv(mono_path, stringsAsFactors = FALSE)
+attn <- read.csv(attn_path, stringsAsFactors = FALSE)
 freq <- read.table(freq_path, sep = "\t", header = TRUE,
                    stringsAsFactors = FALSE, quote = "") %>%
   transmute(word_lower = tolower(trimws(Word)), log10_freq = Lg10WF)
@@ -77,6 +83,14 @@ predictors <- nmt %>%
     mono %>% select(sentence_id, word_index,
                     mono_surprisal = surprisal_sum),
     by = c("sentence_id", "word_index")
+  ) %>%
+  left_join(
+    attn %>% select(
+      sentence_id, word_index, H_e = attn_entropy,
+      f_e = attn_context, f_eos = attn_eos,
+      f_recv = attn_recv, f_cross = attn_cross
+    ),
+    by = c("sentence_id", "word_index")
   )
 
 rq1_data <- fix %>%
@@ -84,14 +98,16 @@ rq1_data <- fix %>%
   filter(
     stage == "translate",
     !is.na(nmt_surprisal), !is.na(mono_surprisal), !is.na(log10_freq),
-    !(sentence_id == "S003" & word_index == 3L &
-        tolower(trimws(word)) == "stoplight")
-  )
+    !is.na(H_e), !is.na(f_e), !is.na(f_eos), !is.na(f_recv),
+    !is.na(f_cross)
+  ) %>%
+  anti_join(tibble(sentence_id = "S003", word_index = 3L),
+            by = c("sentence_id", "word_index"))
 
 stopifnot(
   nrow(rq1_data) == length(pw_nmt),
-  nrow(rq1_data) == 5149L,
-  n_distinct(rq1_data$sentence_id) == 200L,
+  nrow(rq1_data) > 0L,
+  n_distinct(rq1_data$sentence_id) > 1L,
   all(tapply(folds_nmt, rq1_data$sentence_id,
              function(x) length(unique(x))) == 1L)
 )
@@ -136,9 +152,9 @@ results <- tibble(
   seed = seed
 )
 
-write.csv(results, path("rq1_direct_nmt_vs_mono_results.csv"),
+write.csv(results, file.path(output_dir, "rq1_direct_nmt_vs_mono_results.csv"),
           row.names = FALSE)
 write.csv(sentence_results,
-          path("rq1_direct_nmt_vs_mono_sentence_deltas.csv"),
+          file.path(output_dir, "rq1_direct_nmt_vs_mono_sentence_deltas.csv"),
           row.names = FALSE)
 print(results)

@@ -46,7 +46,8 @@ cat(sprintf("FFD n=%d  GD n=%d  conditional RRT n=%d\n",
             nrow(df_ffd), nrow(df_gd), nrow(df_rrt)))
 
 pri<-c(prior(normal(0,1),class=b),prior(normal(6,1),class=Intercept),prior(exponential(1),class=sd),prior(exponential(1),class=sigma))
-CACHE<-file.path(DATA_DIR,"brm_cache"); CTRL<-"c_wlen+c_wpos+c_freq+ambiguity"; RE<-"(1|participant)+(1|sentence_id)"
+CACHE<-file.path(DATA_DIR,"brm_cache"); dir.create(CACHE, showWarnings=FALSE)
+CTRL<-"c_wlen+c_wpos+c_freq+ambiguity"; RE<-"(1|participant)+(1|sentence_id)"
 sfp<-function(ds,n=10000){o<-sum(ds);set.seed(42);mean(replicate(n,sum(ds*sample(c(-1,1),length(ds),replace=TRUE)))>=o)}
 
 run_outcome <- function(df, y, tag) {
@@ -54,8 +55,8 @@ run_outcome <- function(df, y, tag) {
   set.seed(42); fv<-loo::kfold_split_grouped(K=10,x=sid)
   f<-function(rhs) as.formula(paste(y,"~",CTRL,rhs,"+",RE))
   fitkf<-function(nm,form){p<-file.path(CACHE,sprintf("rq3kf_%s_%s.rds",tag,nm)); if(file.exists(p))return(readRDS(p))
-    m<-brm(form,data=df,prior=pri,control=list(adapt_delta=0.95,max_treedepth=12),chains=4,iter=2000,warmup=1000,silent=2,refresh=0)
-    kf<-kfold(m,folds=fv,chains=4,iter=2000,warmup=1000,silent=2,refresh=0);saveRDS(kf,p);kf}
+    m<-brm(form,data=df,prior=pri,control=list(adapt_delta=0.95,max_treedepth=12),chains=4,iter=2000,warmup=1000,seed=42,silent=2,refresh=0)
+    kf<-kfold(m,folds=fv,chains=4,iter=2000,warmup=1000,seed=42,silent=2,refresh=0);saveRDS(kf,p);kf}
   pb<-fitkf("base",f(""))$pointwise[,"elpd_kfold"]
   res<-data.frame(outcome=tag,predictor=c("c_nmt","c_mono"),elpd_diff=NA,se_cluster=NA,p=NA)
   for(k in 1:2){v<-c("c_nmt","c_mono")[k]; pt<-fitkf(v,f(paste("+",v)))$pointwise[,"elpd_kfold"]
