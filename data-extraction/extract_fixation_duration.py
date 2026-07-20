@@ -186,8 +186,6 @@ def process_directory(directory, stage_label, sentences, results):
         if parts is None:
             continue
         participant, order, sentence_id, ambiguity, congruency = parts
-        if congruency == "X":
-            continue  # shared non-experimental items S031 and S032
         words = sentences.get(sentence_id)
         if words is None:
             continue

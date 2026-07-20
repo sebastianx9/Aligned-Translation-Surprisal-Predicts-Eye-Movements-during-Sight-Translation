@@ -24,6 +24,17 @@ if (length(missing_packages)) {
     "\nRun hpc/csf3_install_packages.sbatch, then resubmit this check."
   )
 }
+suppressPackageStartupMessages(library(dplyr))
+
+script_file <- sub(
+  "^--file=", "",
+  grep("^--file=", commandArgs(FALSE), value = TRUE)[1]
+)
+repo_dir <- Sys.getenv(
+  "DISSERTATION_REPO_DIR",
+  normalizePath(file.path(dirname(script_file), ".."), mustWork = TRUE)
+)
+source(file.path(repo_dir, "R", "analysis_design.R"))
 
 required_files <- c(
   "fixation_durations_word.csv", "eye_measures_word.csv",
@@ -48,18 +59,49 @@ eye <- read.csv(
 )
 stopifnot(
   nrow(fix) == nrow(eye),
-  nrow(fix) == 13178L,
+  nrow(fix) == 14185L,
+  "go_past_ms" %in% names(eye),
+  sum(eye$stage == "read" & !is.na(eye$go_past_ms)) == 4227L,
+  sum(eye$stage == "translate" & !is.na(eye$go_past_ms)) == 3626L,
   length(unique(fix$participant)) == 42L,
-  !any(fix$sentence_id %in% c("S031", "S032")),
-  !any(eye$sentence_id %in% c("S031", "S032"))
+  n_distinct(fix$sentence_id) == 200L,
+  n_distinct(eye$sentence_id) == 200L,
+  sum(fix$stage == "read") == 7664L,
+  sum(fix$stage == "translate") == 6521L,
+  setequal(
+    intersect(unique(fix$sentence_id), c("S031", "S032")),
+    c("S031", "S032")
+  ),
+  setequal(
+    intersect(unique(eye$sentence_id), c("S031", "S032")),
+    c("S031", "S032")
+  )
 )
 cat(sprintf(
-  "Corrected inputs: %d rows | %d participants | read=%d | translate=%d\n",
+  paste0(
+    "Corrected full inputs: %d rows | %d participants | %d sentence IDs | ",
+    "read=%d | translate=%d\n"
+  ),
   nrow(fix), length(unique(fix$participant)),
+  n_distinct(fix$sentence_id),
   sum(fix$stage == "read"), sum(fix$stage == "translate")
 ))
 
-suppressPackageStartupMessages(library(dplyr))
+fix_without_contrastive <- fix %>%
+  filter(!sentence_id %in% c("S031", "S032"))
+eye_without_contrastive <- eye %>%
+  filter(!sentence_id %in% c("S031", "S032"))
+stopifnot(
+  nrow(fix_without_contrastive) == 13167L,
+  nrow(eye_without_contrastive) == 13167L,
+  n_distinct(fix_without_contrastive$sentence_id) == 198L,
+  n_distinct(eye_without_contrastive$sentence_id) == 198L
+)
+cat(sprintf(
+  "Leave-pair-out subset: %d fixation rows | %d eye-measure rows | 198 sentences\n",
+  nrow(fix_without_contrastive), nrow(eye_without_contrastive)
+))
+
 nmt <- read.csv(
   file.path(data_dir, "nmt_surprisal_soft_word.csv"),
   stringsAsFactors = FALSE
@@ -76,7 +118,7 @@ freq <- read.table(
   file.path(data_dir, "subtlex_us.csv"), sep = "\t", header = TRUE,
   stringsAsFactors = FALSE, quote = ""
 ) %>%
-  transmute(word_lower = tolower(trimws(Word)), log10_freq = Lg10WF)
+  transmute(word_lower = lexical_form(Word), log10_freq = Lg10WF)
 
 sentence_lengths <- nmt %>%
   group_by(sentence_id) %>%
@@ -84,9 +126,9 @@ sentence_lengths <- nmt %>%
 predictors <- nmt %>%
   left_join(sentence_lengths, by = "sentence_id") %>%
   mutate(
-    word_length = nchar(word),
-    word_position = word_index / (sentence_length - 1),
-    word_lower = tolower(trimws(word))
+    word_lower = lexical_form(word),
+    word_length = nchar(word_lower, type = "chars"),
+    word_position = word_index / (sentence_length - 1)
   ) %>%
   left_join(freq, by = "word_lower") %>%
   left_join(
@@ -130,22 +172,75 @@ rrt <- eye %>%
     !(sentence_id == "S003" & word_index == 3L),
     regress_in == 1L, rrt_ms > 0
   )
+go_past <- eye %>%
+  filter(stage == "translate") %>%
+  left_join(predictors, by = c("sentence_id", "word_index")) %>%
+  filter(
+    !is.na(surprisal_soft), !is.na(mono_surprisal), !is.na(log10_freq),
+    !(sentence_id == "S003" & word_index == 3L),
+    !is.na(go_past_ms), go_past_ms > 0
+  )
 stopifnot(
-  nrow(primary) == 5483L,
-  n_distinct(primary$sentence_id) == 198L,
-  nrow(pooled) == 12018L,
-  sum(pooled$stage == "translate") == 5483L,
-  sum(pooled$stage == "read") == 6535L,
-  nrow(rrt) == 2640L
+  nrow(primary) == 6476L,
+  nrow(pooled) == 14095L,
+  sum(pooled$stage == "translate") == 6476L,
+  sum(pooled$stage == "read") == 7619L,
+  nrow(rrt) == 3065L,
+  nrow(go_past) == 3597L,
+  n_distinct(primary$sentence_id) == 200L,
+  n_distinct(pooled$sentence_id) == 200L
 )
+primary_design <- design_counts(primary$sentence_id)
+stopifnot(
+  unname(primary_design[["n_sentence_ids"]]) == 200L,
+  unname(primary_design[["n_inference_clusters"]]) == 199L
+)
+primary_folds <- make_sentence_folds(primary$sentence_id, K = 10L, seed = 42L)
+assert_contrastive_fold_binding(primary_folds, primary$sentence_id)
 cat(sprintf(
   paste0(
     "Analysis samples: RQ1=%d/%d sentences | ",
-    "RQ2=%d (%d translate + %d read) | conditional RRT=%d\n"
+    "RQ2=%d (%d translate + %d read) | go-past=%d | conditional RRT=%d\n"
   ),
   nrow(primary), n_distinct(primary$sentence_id), nrow(pooled),
   sum(pooled$stage == "translate"), sum(pooled$stage == "read"),
+  nrow(go_past),
   nrow(rrt)
+))
+
+primary_without_contrastive <- primary %>%
+  filter(!sentence_id %in% c("S031", "S032"))
+pooled_without_contrastive <- pooled %>%
+  filter(!sentence_id %in% c("S031", "S032"))
+rrt_without_contrastive <- rrt %>%
+  filter(!sentence_id %in% c("S031", "S032"))
+go_past_without_contrastive <- go_past %>%
+  filter(!sentence_id %in% c("S031", "S032"))
+stopifnot(
+  nrow(primary_without_contrastive) == 5988L,
+  nrow(pooled_without_contrastive) == 13077L,
+  sum(pooled_without_contrastive$stage == "translate") == 5988L,
+  sum(pooled_without_contrastive$stage == "read") == 7089L,
+  nrow(rrt_without_contrastive) == 2832L,
+  nrow(go_past_without_contrastive) == 3280L,
+  n_distinct(primary_without_contrastive$sentence_id) == 198L,
+  n_distinct(pooled_without_contrastive$sentence_id) == 198L
+)
+excluded_design <- design_counts(primary_without_contrastive$sentence_id)
+stopifnot(
+  unname(excluded_design[["n_sentence_ids"]]) == 198L,
+  unname(excluded_design[["n_inference_clusters"]]) == 198L
+)
+cat(sprintf(
+  paste0(
+    "Leave-pair-out analysis samples: RQ1=%d/198 sentences | ",
+    "RQ2=%d (%d translate + %d read) | go-past=%d | conditional RRT=%d\n"
+  ),
+  nrow(primary_without_contrastive), nrow(pooled_without_contrastive),
+  sum(pooled_without_contrastive$stage == "translate"),
+  sum(pooled_without_contrastive$stage == "read"),
+  nrow(go_past_without_contrastive),
+  nrow(rrt_without_contrastive)
 ))
 
 cat("\nPackage versions:\n")

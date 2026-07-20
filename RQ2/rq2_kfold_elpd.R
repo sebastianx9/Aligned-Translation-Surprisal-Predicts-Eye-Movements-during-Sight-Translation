@@ -37,6 +37,10 @@ suppressMessages({library(brms); library(dplyr)})
 
 options(mc.cores = 4)
 
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
+repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
+source(file.path(repo_root, "R", "analysis_design.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(name, default) {
   hit <- grep(paste0("^", name, "="), args, value = TRUE)
@@ -48,21 +52,34 @@ DATA_DIR <- normalizePath(
   mustWork = TRUE
 )
 OUT <- get_arg("--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", DATA_DIR))
+exclude_contrastive <- parse_bool(
+  get_arg("--exclude-contrastive", "false"), "--exclude-contrastive"
+)
 dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
 
 # ── Data prep (identical to rq2_nested_ladder.R / rq2_brm_joint.R) ───────────
-fix  <- read.csv(file.path(DATA_DIR, "fixation_durations_word.csv"),    stringsAsFactors=FALSE)
-nmt  <- read.csv(file.path(DATA_DIR, "nmt_surprisal_soft_word.csv"),    stringsAsFactors=FALSE)
-mono <- read.csv(file.path(DATA_DIR, "monolingual_surprisal_word.csv"), stringsAsFactors=FALSE)
-freq <- read.table(file.path(DATA_DIR, "subtlex_us.csv"), sep="\t",
+fix_path <- file.path(DATA_DIR, "fixation_durations_word.csv")
+nmt_path <- file.path(DATA_DIR, "nmt_surprisal_soft_word.csv")
+mono_path <- file.path(DATA_DIR, "monolingual_surprisal_word.csv")
+freq_path <- file.path(DATA_DIR, "subtlex_us.csv")
+input_hashes <- analysis_input_hashes(c(
+  fixation=fix_path, nmt_surprisal=nmt_path,
+  monolingual_surprisal=mono_path, frequency=freq_path,
+  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+))
+
+fix  <- read.csv(fix_path, stringsAsFactors=FALSE)
+nmt  <- read.csv(nmt_path, stringsAsFactors=FALSE)
+mono <- read.csv(mono_path, stringsAsFactors=FALSE)
+freq <- read.table(freq_path, sep="\t",
                    header=TRUE, stringsAsFactors=FALSE, quote="") %>%
-  select(word=Word, log10_freq=Lg10WF) %>% mutate(word=tolower(trimws(word)))
+  transmute(word_lower=lexical_form(Word), log10_freq=Lg10WF)
 
 sl <- nmt %>% group_by(sentence_id) %>% summarise(sent_len=max(word_index)+1, .groups="drop")
 pred <- nmt %>% left_join(sl, by="sentence_id") %>%
-  mutate(word_length=nchar(word), word_position=word_index/(sent_len-1),
-         word_lower=tolower(trimws(word))) %>%
-  left_join(freq, by=c("word_lower"="word")) %>%
+  mutate(word_lower=lexical_form(word), word_length=nchar(word_lower, type="chars"),
+         word_position=word_index/(sent_len-1)) %>%
+  left_join(freq, by="word_lower") %>%
   left_join(mono %>% select(sentence_id, word_index, mono_surprisal=surprisal_sum),
             by=c("sentence_id","word_index")) %>%
   select(sentence_id, word_index, word_length, word_position,
@@ -78,18 +95,27 @@ df <- fix %>% filter(stage %in% c("translate","read")) %>%
 z <- function(x) (x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)
 df <- df %>% mutate(c_nmt=z(nmt_surprisal), c_mono=z(mono_surprisal),
                     c_wlen=z(word_length), c_wpos=z(word_position), c_freq=z(log10_freq))
+fold_vec_full <- make_sentence_folds(df$sentence_id, K = 10, seed = 42)
+keep <- contrastive_keep(df$sentence_id, exclude_contrastive)
+df <- df[keep, , drop = FALSE]
+fold_vec <- fold_vec_full[keep]
 
 N <- nrow(df)
-cat(sprintf("Pooled: N = %d (translate %d, read %d) | sentences = %d | participants = %d\n\n",
+counts <- design_counts(df$sentence_id)
+J <- unname(counts[["n_sentence_ids"]])
+G <- unname(counts[["n_inference_clusters"]])
+cat(sprintf(paste0(
+              "Pooled: N = %d (translate %d, read %d) | sentence IDs = %d | ",
+              "inference clusters = %d | participants = %d | contrastive pair = %s\n\n"),
             N, sum(df$cond==1), sum(df$cond==0),
-            n_distinct(df$sentence_id), n_distinct(df$participant)))
+            J, G, n_distinct(df$participant),
+            ifelse(exclude_contrastive, "excluded", "included and paired")))
 
 # ── Shared, sentence-grouped fold assignment ─────────────────────────────────
-set.seed(42)
-fold_vec <- loo::kfold_split_grouped(K = 10, x = df$sentence_id)
 stopifnot(length(fold_vec) == N)
 # sanity: no sentence straddles two folds
 stopifnot(all(tapply(fold_vec, df$sentence_id, function(f) length(unique(f))) == 1))
+assert_contrastive_fold_binding(fold_vec, df$sentence_id)
 cat("Fold sizes (observations):\n"); print(table(fold_vec))
 cat("\n")
 
@@ -118,12 +144,20 @@ dir.create(CACHE, showWarnings=FALSE)
 ptw <- list()   # pointwise elpd_kfold, one vector of length N per model
 kfs <- list()   # full kfold objects, kept for the official loo_compare() cross-check
 for (nm in names(forms)) {
-  # v2 caches are deliberately separate from the earlier specification in
-  # which control slopes were constrained to be equal across stages.
-  path <- file.path(CACHE, sprintf("kfold_v2_%s.rds", nm))
+  # v3 also encodes the bound contrastive-pair fold allocation.
+  path <- file.path(
+    CACHE,
+    variant_filename(sprintf("kfold_v3_%s.rds", nm),
+                     exclude_contrastive)
+  )
   if (file.exists(path)) {
     cat(sprintf("[%s] loading cached kfold\n", nm))
     kf <- readRDS(path)
+    assert_analysis_input_hashes(kf, input_hashes, path)
+    stopifnot(
+      length(kf$pointwise[, "elpd_kfold"]) == N,
+      identical(as.integer(attr(kf, "folds")), as.integer(fold_vec))
+    )
   } else {
     cat(sprintf("[%s] fitting + 10-fold refit ...\n", nm))
     t0 <- proc.time()
@@ -133,6 +167,7 @@ for (nm in names(forms)) {
              silent=2, refresh=0)
     kf <- kfold(m, folds = fold_vec, chains = 4, iter = 2000, warmup = 1000,
                 seed = 42, silent = 2, refresh = 0)
+    kf <- set_analysis_input_hashes(kf, input_hashes)
     saveRDS(kf, path)
     cat(sprintf("[%s] done in %.0f min\n", nm, (proc.time()-t0)["elapsed"]/60))
   }
@@ -142,17 +177,20 @@ for (nm in names(forms)) {
 
 # ── The three rungs ──────────────────────────────────────────────────────────
 sid <- df$sentence_id
-S   <- n_distinct(sid)
 
 sign_flip_p <- function(d_s, n_perm = 10000) {
   obs <- sum(d_s); set.seed(42)
-  mean(replicate(n_perm, sum(d_s * sample(c(-1,1), length(d_s), replace=TRUE))) >= obs)
+  permuted <- replicate(
+    n_perm,
+    sum(d_s * sample(c(-1,1), length(d_s), replace=TRUE))
+  )
+  (1 + sum(permuted >= obs)) / (n_perm + 1)
 }
 
 report <- function(nm, question, d_i) {
-  d_s <- tapply(d_i, sid, sum)                 # one number per sentence (a cluster)
+  d_s <- cluster_delta_sums(d_i, sid)          # one number per inference cluster
   elpd_diff  <- sum(d_i)
-  se_cluster <- sd(d_s) * sqrt(S)              # sentence-clustered
+  se_cluster <- sd(d_s) * sqrt(G)              # sentence-clustered
   se_naive   <- sd(d_i) * sqrt(N)              # what loo_compare() would print
   p          <- sign_flip_p(d_s)
   cat(sprintf("\n%s\n  %s\n", nm, question))
@@ -170,7 +208,8 @@ report <- function(nm, question, d_i) {
 cat("\n══════════════════════════════════════════════════════════════════\n")
 cat("RQ2 NESTED LADDER — brms + sentence-grouped 10-fold, elpd\n")
 cat(sprintf("RE (identical across every pair): %s\n", RE))
-cat(sprintf("N = %d observations, S = %d sentences\n", N, S))
+cat(sprintf("N = %d observations, J = %d sentence IDs, G = %d inference clusters\n",
+            N, J, G))
 cat("══════════════════════════════════════════════════════════════════\n")
 
 res <- list(
@@ -201,6 +240,10 @@ official("M2 vs M1", kfs$M1, kfs$M2)
 official("M3 vs M2", kfs$M2, kfs$M3)
 official("M3 vs N1", kfs$N1, kfs$M3)
 
-saveRDS(list(pointwise=ptw, sentence_id=sid, res=res, N=N, S=S),
-        file.path(OUT, "rq2_kfold_elpd.rds"))
-cat("\nSaved rq2_kfold_elpd.rds\n")
+output_name <- variant_filename("rq2_kfold_elpd.rds", exclude_contrastive)
+saveRDS(list(pointwise=ptw, sentence_id=sid, res=res, N=N,
+             J=J, G=G, S=G, folds=fold_vec,
+             exclude_contrastive=exclude_contrastive,
+             input_hashes=input_hashes),
+        file.path(OUT, output_name))
+cat("\nSaved ", output_name, "\n", sep="")

@@ -8,6 +8,10 @@
 suppressMessages({library(brms); library(dplyr)})
 options(mc.cores = 4)
 
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
+repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
+source(file.path(repo_root, "R", "analysis_design.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(name, default) {
   hit <- grep(paste0("^", name, "="), args, value = TRUE)
@@ -21,29 +25,32 @@ DATA_DIR <- normalizePath(
 OUT <- get_arg(
   "--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", DATA_DIR)
 )
+exclude_contrastive <- parse_bool(
+  get_arg("--exclude-contrastive", "false"), "--exclude-contrastive"
+)
 dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
 
-fix <- read.csv(
-  file.path(DATA_DIR, "fixation_durations_word.csv"),
-  stringsAsFactors = FALSE
-)
-nmt <- read.csv(
-  file.path(DATA_DIR, "nmt_surprisal_soft_word.csv"),
-  stringsAsFactors = FALSE
-)
-mono <- read.csv(
-  file.path(DATA_DIR, "monolingual_surprisal_word.csv"),
-  stringsAsFactors = FALSE
-)
-attn <- read.csv(
-  file.path(DATA_DIR, "attention_features_6_norm.csv"),
-  stringsAsFactors = FALSE
-)
+fix_path <- file.path(DATA_DIR, "fixation_durations_word.csv")
+nmt_path <- file.path(DATA_DIR, "nmt_surprisal_soft_word.csv")
+mono_path <- file.path(DATA_DIR, "monolingual_surprisal_word.csv")
+attn_path <- file.path(DATA_DIR, "attention_features_6_norm.csv")
+freq_path <- file.path(DATA_DIR, "subtlex_us.csv")
+input_hashes <- analysis_input_hashes(c(
+  fixation=fix_path, nmt_surprisal=nmt_path,
+  monolingual_surprisal=mono_path, attention_features=attn_path,
+  frequency=freq_path,
+  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+))
+
+fix <- read.csv(fix_path, stringsAsFactors = FALSE)
+nmt <- read.csv(nmt_path, stringsAsFactors = FALSE)
+mono <- read.csv(mono_path, stringsAsFactors = FALSE)
+attn <- read.csv(attn_path, stringsAsFactors = FALSE)
 freq <- read.table(
-  file.path(DATA_DIR, "subtlex_us.csv"), sep = "\t", header = TRUE,
+  freq_path, sep = "\t", header = TRUE,
   stringsAsFactors = FALSE, quote = ""
 ) %>%
-  transmute(word_lower = tolower(trimws(Word)), log10_freq = Lg10WF)
+  transmute(word_lower = lexical_form(Word), log10_freq = Lg10WF)
 
 sentence_lengths <- nmt %>%
   group_by(sentence_id) %>%
@@ -51,9 +58,9 @@ sentence_lengths <- nmt %>%
 predictors <- nmt %>%
   left_join(sentence_lengths, by = "sentence_id") %>%
   mutate(
-    word_length = nchar(word),
-    word_position = word_index / (sentence_length - 1),
-    word_lower = tolower(trimws(word))
+    word_lower = lexical_form(word),
+    word_length = nchar(word_lower, type = "chars"),
+    word_position = word_index / (sentence_length - 1)
   ) %>%
   left_join(freq, by = "word_lower") %>%
   left_join(
@@ -97,20 +104,26 @@ df <- df %>% mutate(
   c_wlen = z(word_length), c_wpos = z(word_position),
   c_freq = z(log10_freq)
 )
+fold_vec_full <- make_sentence_folds(df$sentence_id, K = 10, seed = 42)
+keep <- contrastive_keep(df$sentence_id, exclude_contrastive)
+df <- df[keep, , drop = FALSE]
+fold_vec <- fold_vec_full[keep]
 N <- nrow(df)
 sid <- df$sentence_id
-S <- n_distinct(sid)
+counts <- design_counts(sid)
+J <- unname(counts[["n_sentence_ids"]])
+G <- unname(counts[["n_inference_clusters"]])
 cat(sprintf(
-  "Translate: N=%d | sentences=%d | participants=%d\n",
-  N, S, n_distinct(df$participant)
+  "Translate: N=%d | sentence IDs=%d | inference clusters=%d | participants=%d | contrastive pair=%s\n",
+  N, J, G, n_distinct(df$participant),
+  ifelse(exclude_contrastive, "excluded", "included and paired")
 ))
 
-set.seed(42)
-fold_vec <- loo::kfold_split_grouped(K = 10, x = sid)
 stopifnot(
   N > 0L,
   all(tapply(fold_vec, sid, function(x) length(unique(x))) == 1L)
 )
+assert_contrastive_fold_binding(fold_vec, sid)
 
 priors <- c(
   prior(normal(0, 1), class = b),
@@ -124,10 +137,15 @@ CTRL <- "c_wlen + c_wpos + c_freq + ambiguity"
 RE <- "(1 | participant) + (1 | sentence_id)"
 
 fit_kfold <- function(name, formula) {
-  cache_path <- file.path(CACHE, sprintf("rq1kf_%s.rds", name))
+  cache_path <- file.path(
+    CACHE,
+    variant_filename(sprintf("rq1kf_v3_%s.rds", name),
+                     exclude_contrastive)
+  )
   if (file.exists(cache_path)) {
     cat(sprintf("[%s] loading cached kfold\n", name))
     result <- readRDS(cache_path)
+    assert_analysis_input_hashes(result, input_hashes, cache_path)
     stopifnot(isTRUE(all.equal(
       as.numeric(attr(result, "folds")), as.numeric(fold_vec)
     )))
@@ -144,6 +162,7 @@ fit_kfold <- function(name, formula) {
     model, folds = fold_vec, chains = 4, iter = 2000, warmup = 1000,
     seed = 42, silent = 2, refresh = 0
   )
+  result <- set_analysis_input_hashes(result, input_hashes)
   saveRDS(result, cache_path)
   result
 }
@@ -158,13 +177,13 @@ ptw_mono <- fit_kfold("c_mono", mono_formula)$pointwise[, "elpd_kfold"]
 ptw_both <- fit_kfold("c_mono_nmt", both_formula)$pointwise[, "elpd_kfold"]
 
 pointwise_delta <- ptw_both - ptw_mono
-sentence_delta <- tapply(pointwise_delta, sid, sum)
+sentence_delta <- cluster_delta_sums(pointwise_delta, sid)
 delta_elpd <- sum(pointwise_delta)
-clustered_se <- sd(sentence_delta) * sqrt(S)
+clustered_se <- sd(sentence_delta) * sqrt(G)
 set.seed(42)
 permuted <- replicate(
   10000L,
-  sum(sentence_delta * sample(c(-1, 1), S, replace = TRUE))
+  sum(sentence_delta * sample(c(-1, 1), G, replace = TRUE))
 )
 p_signflip <- (1 + sum(permuted >= delta_elpd)) / 10001
 
@@ -177,8 +196,12 @@ result <- list(
   pointwise_both = ptw_both,
   sid = sid,
   N = N,
-  S = S,
-  folds = fold_vec
+  J = J,
+  G = G,
+  S = G,
+  exclude_contrastive = exclude_contrastive,
+  folds = fold_vec,
+  input_hashes = input_hashes
 )
 print(data.frame(
   contrast = "c_nmt beyond controls + c_mono",
@@ -186,6 +209,11 @@ print(data.frame(
   clustered_se = clustered_se,
   p_signflip_one_sided = p_signflip,
   n_observations = N,
-  n_sentences = S
+  n_sentence_ids = J,
+  n_inference_clusters = G
 ))
-saveRDS(result, file.path(OUT, "rq2_beyond_kfold.rds"))
+saveRDS(
+  result,
+  file.path(OUT, variant_filename("rq2_beyond_kfold.rds",
+                                  exclude_contrastive))
+)

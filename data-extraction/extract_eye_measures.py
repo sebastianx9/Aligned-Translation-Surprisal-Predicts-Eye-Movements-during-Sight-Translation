@@ -4,12 +4,16 @@ Extract word-level eye movement measures for READ and TRANSLATE stages:
   - FFD  : first fixation duration (ms)  — first bout on word
   - GD   : first-pass gaze duration (ms) — consecutive bouts from first landing
              until eye leaves word region (in any direction)
+  - Go-past: go-past time (ms)          — fixation time from first landing
+             until, but excluding, the first subsequent fixation to the right;
+             fixations on the word and on prior words are included
   - RRT  : re-reading time (ms)          — all fixations on word after first pass
   - n_fix: total number of fixation bouts on word
   - regress_in: 1 if word re-fixated after first pass, else 0
 
 Two-stage theoretical motivation:
-  FFD / GD capture initial lexical access (surprisal expected here)
+  FFD / GD / go-past capture first-pass processing (go-past also includes
+  regressions to prior text before the first rightward crossing)
   RRT / regress_in capture re-consultation during translation production
   (attention features may have signal here)
 
@@ -167,6 +171,7 @@ def compute_measures(bouts, n_words):
     tfd   = [0.0]  * n_words
     ffd   = [None] * n_words
     gd    = [0.0]  * n_words
+    go_past = [None] * n_words
     rrt   = [0.0]  * n_words
     n_fix = [0]    * n_words
     first_fix_bout = [None] * n_words  # index of first bout on word
@@ -181,7 +186,15 @@ def compute_measures(bouts, n_words):
             first_fix_bout[wi] = i
             ffd[wi] = dur
 
-    # Pass 2: GD (consecutive bouts from first landing) and RRT (remainder)
+    # Pass 2: GD (consecutive bouts from first landing), go-past (regression
+    # path), and RRT (remainder). Go-past follows Lijewska et al.'s definition:
+    # starting with a word's first fixation, sum fixation durations on that
+    # word and on prior words until (but excluding) the first later fixation
+    # to its right.
+    # It is structurally undefined if that crossing never occurs. A word first
+    # encountered only after a word to its right has already been fixated is
+    # also left undefined: that landing is a regression-in, not a genuine
+    # first-pass encounter with the word.
     for w in range(n_words):
         idx = first_fix_bout[w]
         if idx is None:
@@ -191,6 +204,27 @@ def compute_measures(bouts, n_words):
         while i < len(bouts) and bouts[i][0] == w:
             gd[w] += bouts[i][1]
             i += 1
+
+        previously_visited_right = any(
+            0 <= prior_wi < n_words and prior_wi > w
+            for prior_wi, _ in bouts[:idx]
+        )
+        if not previously_visited_right:
+            crossing_idx = next(
+                (
+                    j
+                    for j in range(idx + 1, len(bouts))
+                    if 0 <= bouts[j][0] < n_words and bouts[j][0] > w
+                ),
+                None,
+            )
+            if crossing_idx is not None:
+                go_past[w] = sum(
+                    dur
+                    for wi, dur in bouts[idx:crossing_idx]
+                    if 0 <= wi < n_words
+                )
+
         # RRT: any later fixations on w
         for j in range(i, len(bouts)):
             if bouts[j][0] == w:
@@ -201,6 +235,9 @@ def compute_measures(bouts, n_words):
             "tfd_ms":      round(tfd[w], 2),
             "ffd_ms":      round(ffd[w], 2),
             "gd_ms":       round(gd[w], 2),
+            "go_past_ms":  (
+                round(go_past[w], 2) if go_past[w] is not None else None
+            ),
             "rrt_ms":      round(rrt[w], 2),
             "n_fix":       n_fix[w],
             "regress_in":  int(rrt[w] > 0),
@@ -225,8 +262,6 @@ def process_directory(directory, stage_label, sentences, results):
         if parts is None:
             continue
         participant, order, sentence_id, ambiguity, congruency = parts
-        if congruency == "X":
-            continue  # shared non-experimental items S031 and S032
         words = sentences.get(sentence_id)
         if words is None:
             continue
@@ -300,7 +335,8 @@ def main():
 
     fields = ["participant", "order", "sentence_id", "ambiguity", "congruency",
               "stage", "word_index", "word",
-              "tfd_ms", "ffd_ms", "gd_ms", "rrt_ms", "n_fix", "regress_in"]
+              "tfd_ms", "ffd_ms", "gd_ms", "go_past_ms", "rrt_ms",
+              "n_fix", "regress_in"]
 
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)

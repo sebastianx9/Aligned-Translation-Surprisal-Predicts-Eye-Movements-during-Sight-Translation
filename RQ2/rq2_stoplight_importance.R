@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# Sequential posterior sensitivity check for restoring the seven pooled
+# Sequential posterior sensitivity check for restoring the nine pooled
 # read/translate S003/stoplight observations to the RQ2 joint model. The added
 # rows are scored with the primary model's clean-sample centring and scaling.
 # Pareto k and importance ESS diagnose the posterior reweighting.
@@ -10,6 +10,10 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(posterior)
 })
+
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
+repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
+source(file.path(repo_root, "R", "analysis_design.R"))
 
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(name, default) {
@@ -21,15 +25,30 @@ data_dir <- normalizePath(
   get_arg("--data-dir", Sys.getenv("DISSERTATION_DATA_DIR", ".")),
   mustWork = TRUE
 )
+output_dir <- get_arg(
+  "--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", data_dir)
+)
+dir.create(output_dir, recursive=TRUE, showWarnings=FALSE)
 path <- function(...) file.path(data_dir, ...)
 
-model <- readRDS(path("brm_cache", "rq2_joint_maximal_v2.rds"))
-fix <- read.csv(path("fixation_durations_word.csv"), stringsAsFactors = FALSE)
-nmt <- read.csv(path("nmt_surprisal_soft_word.csv"), stringsAsFactors = FALSE)
-mono <- read.csv(path("monolingual_surprisal_word.csv"), stringsAsFactors = FALSE)
-freq <- read.table(path("subtlex_us.csv"), sep = "\t", header = TRUE,
+fix_path <- path("fixation_durations_word.csv")
+nmt_path <- path("nmt_surprisal_soft_word.csv")
+mono_path <- path("monolingual_surprisal_word.csv")
+freq_path <- path("subtlex_us.csv")
+input_hashes <- analysis_input_hashes(c(
+  fixation=fix_path, nmt_surprisal=nmt_path,
+  monolingual_surprisal=mono_path, frequency=freq_path,
+  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+))
+model_path <- path("brm_cache", "rq2_joint_maximal_v3.rds")
+model <- readRDS(model_path)
+assert_analysis_input_hashes(model, input_hashes, model_path)
+fix <- read.csv(fix_path, stringsAsFactors = FALSE)
+nmt <- read.csv(nmt_path, stringsAsFactors = FALSE)
+mono <- read.csv(mono_path, stringsAsFactors = FALSE)
+freq <- read.table(freq_path, sep = "\t", header = TRUE,
                    stringsAsFactors = FALSE, quote = "") %>%
-  transmute(word_lower = tolower(trimws(Word)), log10_freq = Lg10WF)
+  transmute(word_lower = lexical_form(Word), log10_freq = Lg10WF)
 
 sentence_lengths <- nmt %>%
   group_by(sentence_id) %>%
@@ -37,9 +56,9 @@ sentence_lengths <- nmt %>%
 predictors <- nmt %>%
   left_join(sentence_lengths, by = "sentence_id") %>%
   mutate(
-    word_length = nchar(word),
-    word_position = word_index / (sentence_length - 1),
-    word_lower = tolower(trimws(word))
+    word_lower = lexical_form(word),
+    word_length = nchar(word_lower, type = "chars"),
+    word_position = word_index / (sentence_length - 1)
   ) %>%
   left_join(freq, by = "word_lower") %>%
   left_join(
@@ -75,7 +94,11 @@ added <- added %>% mutate(
   c_wpos = z_from(word_position, clean$word_position),
   c_freq = z_from(log10_freq, clean$log10_freq)
 )
-stopifnot(nrow(added) == 7L)
+stopifnot(
+  nrow(added) == 9L,
+  sum(added$condition == 0L) == 4L,
+  sum(added$condition == 1L) == 5L
+)
 
 log_likelihood <- log_lik(
   model, newdata = added, re_formula = NULL, allow_new_levels = FALSE
@@ -106,6 +129,6 @@ result <- tibble(
   ci_high = interval[3],
   posterior_pr_positive = sum(weights[interaction > 0])
 )
-write.csv(result, path("rq2_stoplight_importance_results.csv"),
+write.csv(result, file.path(output_dir, "rq2_stoplight_importance_results.csv"),
           row.names = FALSE)
 print(result)

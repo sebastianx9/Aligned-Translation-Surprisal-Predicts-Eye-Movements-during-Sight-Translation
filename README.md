@@ -19,8 +19,10 @@ GPT-2 subword surprisal for each English source word.
   translation than during prior oral reading, after lexical and positional
   controls and $c_\mathrm{mono}$ are included jointly?
 - **RQ3 (exploratory):** Which part of source-text processing carries the
-  association? Re-reading time is conditional on a word having been
-  revisited; the probability of regression-in is not modelled.
+  association? Conditional re-reading time is the theory-driven primary
+  outcome; first-fixation duration, gaze duration, and go-past time are
+  secondary first-pass contrasts. The probability of regression-in is not
+  modelled.
 
 Because reading always precedes translation, RQ2 identifies a
 translation-related stage difference within this fixed-order paradigm. It
@@ -30,13 +32,24 @@ and order.
 ## Headline results
 
 > **Reanalysis in progress.** The numerical values in this section were
-> obtained before the July 2026 correction to EMMT timestamp parsing and are
-> retained only as a record of the previous analysis. The corrected Bayesian
-> models and cross-validation comparisons are being regenerated on the CSF;
-> these values must not be treated as final.
+> obtained before the July 2026 corrections to EMMT timestamp parsing and
+> punctuation-sensitive SUBTLEX matching, and are retained only as a record of
+> the previous analysis. The corrected Bayesian models, including the new
+> go-past outcome, are being regenerated on the CSF; these values must not be
+> treated as final.
+
+In RQ3, conditional RRT retains its theory-driven primary status. The result
+file also reports Holm-adjusted values across the three secondary first-pass
+contrasts (FFD, GD, and go-past); the figure labels nominal values and is
+interpreted descriptively.
 
 All predictive comparisons use the same sentence-grouped 10-fold allocation,
-sentence-clustered standard errors, and sentence-level sign-flip tests.
+sentence-clustered standard errors, and sentence-level sign-flip tests. S031
+and S032 are retained as distinct sentence IDs in the mixed models but are
+kept in the same fold and treated as one cluster for predictive uncertainty,
+because they form a near-minimal contrastive pair. The primary predictive
+analyses therefore contain 200 sentence IDs and 199 inference clusters; the
+leave-pair-out sensitivity analyses contain 198 of each.
 
 | Comparison | Delta ELPD | Clustered SE | p |
 |---|---:|---:|---:|
@@ -59,7 +72,8 @@ and +8.46 for conditional re-reading time (clustered SE = 4.54, nominal
 one-sided p = .032). This is tentative evidence about re-reading duration
 among revisited words, not evidence that higher $c_\mathrm{nmt}$ makes a word
 more likely to be revisited. Non-significant first-pass comparisons are not
-equivalence tests.
+equivalence tests. Go-past time was added to the corrected analysis and has no
+pre-correction result in this table.
 
 ## Data
 
@@ -128,12 +142,26 @@ The EMMT gaze extractors split timestamps on colons rather than fixed character
 positions. This is required because hour, minute, and second fields are not
 consistently zero-padded (for example, `9:18:51.2205` and `12:9:28.1865`).
 Fixation bouts shorter than 20 ms are removed before word-level aggregation in
-both eye-movement extractors. The two shared files marked with congruency `X`
-(S031 and S032) fall outside the corpus's documented 2-by-3 experimental
-condition set and are excluded from the derived analysis files. The EMMT paper
-does not define `X`; these items are therefore described neutrally as
-additional shared items, not as practice trials. The paper separately reports
-a four-item practice round.
+both eye-movement extractors. The eye-measure extractor also derives go-past
+time from the ordered bouts: it accumulates fixation time from a word's first
+landing until, but not including, the first later fixation to its right,
+including intervening regressions to earlier words. It leaves the value missing
+when no rightward crossing is observed or when the word was first encountered
+through a regression from later text.
+
+SUBTLEX lookup keys and the word-length control use a common lexical form:
+surrounding Unicode punctuation is removed and case is normalised, while
+internal apostrophes and hyphens are retained. The original token remains
+unchanged for word-region mapping and display. This prevents sentence-final
+punctuation from being mistaken for an out-of-vocabulary word.
+
+The shared contrastive pair S031/S032 is retained
+in the primary derived files: these are recorded experimental trials, not the
+four-item practice round reported separately in the EMMT paper. Because the
+pair was included in every probe while the remaining sentences were
+distributed across probes, the core models are also refitted
+after excluding both sentences. This leave-pair-out analysis is an influence
+check, not a different fixation-cleaning pipeline.
 
 ## Main analysis scripts
 
@@ -146,28 +174,36 @@ RQ1/rq_locus_kfold.R                  current/preceding/following c_mono check
 RQ2/rq2_joint_maximal.R               joint stage-interaction model
 RQ2/rq2_beyond_kfold.R                c_nmt beyond controls + c_mono
 RQ2/rq2_kfold_elpd.R                  nested predictive comparisons
+RQ2/rq2_reading_cmono_validation.R     reading c_mono and position diagnostic
 RQ2/rq2_stoplight_importance.R        sequential stoplight sensitivity check
 
-RQ3/rq3_kfold_elpd.R                  FFD, GD, and conditional-RRT comparisons
+RQ3/rq3_kfold_elpd.R                  FFD, GD, go-past, and conditional-RRT comparisons
 RQ3/rq3_gd_rrt.R                      RQ3 figure from saved model results
 ```
 
 The complete directories also contain diagnostic, plotting, and alternative
 specification scripts. The previous README's “known gap” no longer applies:
-the exact sentence-grouped RQ1 and RQ3 scripts are now included.
+the exact sentence-grouped RQ1 and RQ3 scripts are now included. The scripts
+listed above, rather than the retained historical alternatives, are the
+authoritative implementations for the reported and CSF-submitted analyses.
 
 ## Computational environment
 
-The recorded environment was:
+Feature extraction and local validation used:
 
 - Python 3.13.3; PyTorch 2.11.0; Transformers 5.6.2; NumPy 2.4.3;
   pandas 3.0.1
 - R 4.5.1; brms 2.23.0; loo 2.9.0; lme4 2.0.1; lmerTest 3.2.1;
   dplyr 1.2.1; posterior 1.7.0
 
-Random seed 42 fixes the primary grouped folds and sign-flip tests. The main
-predictor families use 10,000 sign flips; the direct NMT--monolingual contrast
-and the alignment-mass and *stoplight* checks use 1,000.
+The final Bayesian refits use the CSF3 R 4.4.1 module. Their exact installed
+package versions are printed by the environment check and recorded in every
+batch log; the local R versions above should not be reported as the final CSF
+model-fitting environment.
+
+Random seed 42 fixes the primary grouped folds and sign-flip tests. All formal
+sign-flip tests use 10,000 permutations and the finite-simulation correction
+$(b+1)/(B+1)$.
 
 ### CSF3 / Slurm
 
@@ -183,13 +219,30 @@ sbatch hpc/csf3_check.sbatch
 squeue -u "$USER"
 ```
 
-The check verifies the corrected sample counts and performs a small Stan fit.
+The check verifies that the corrected full inputs contain 200 sentence IDs,
+including S031/S032, checks the lexical-normalised analysis counts and go-past
+column, confirms that removing the pair yields the intended 198-sentence
+sensitivity sample, and performs a small Stan fit.
+An older input archive in which S031/S032 were removed during extraction will
+fail this check and must be replaced with the regenerated full-data archive.
 If it reports missing packages, install them on a compute node and rerun the
 check:
 
 ```bash
 sbatch hpc/csf3_install_packages.sbatch
 ```
+
+An empty `squeue` result only means that the job has left the queue. Confirm
+installation from Slurm accounting and the job log before running analyses:
+
+```bash
+sacct -j JOB_ID --format=JobID,JobName,State,ExitCode,Elapsed,MaxRSS
+tail -n 80 dissertation-r-packages-JOB_ID.out
+tail -n 120 dissertation-r-packages-JOB_ID.err
+```
+
+Proceed only when the batch step reports `COMPLETED` with exit code `0:0` and
+the output confirms that package installation completed.
 
 After the check succeeds, submit the core coefficient and CV jobs:
 
@@ -198,10 +251,19 @@ bash hpc/submit_core_jobs.sh \
   "$DISSERTATION_DATA_DIR" "$DISSERTATION_OUTPUT_DIR"
 ```
 
-The helper keeps dependent jobs in the correct order: the direct RQ1 contrast,
-the alignment-mass check, and the translation-stage RQ2 nested comparison reuse
-the RQ1 fold allocation and caches. Each job log records the R session and
-SHA-256 hashes of the main inputs.
+The helper submits the primary analyses with S031/S032 retained and matched
+leave-pair-out refits for the core RQ1--RQ3 models, the reading-stage
+$c_\mathrm{mono}$ validation, and the neighbouring-word locus checks.
+Sensitivity results are
+written below `results/exclude_contrastive`, while model caches carry a distinct
+`_exclude_contrastive` suffix. It also keeps dependent jobs in the correct
+order: the direct RQ1 contrast, the alignment-mass check, and the
+translation-stage RQ2 nested comparison reuse the relevant RQ1 fold allocation
+and caches. Each job log records the R session, whether the pair was excluded,
+and SHA-256 hashes of the main inputs. The core CV caches and the primary
+coefficient/joint-model caches additionally store MD5 metadata for every input
+they use; scripts that reuse those caches reject them if the files change,
+even when the observation count and fold vector remain the same.
 
 ## References
 
@@ -211,5 +273,8 @@ SHA-256 hashes of the main inputs.
 - Lim, Z. W., Vylomova, E., Kemp, C., & Cohn, T. (2024). Predicting human
   translation difficulty with neural machine translation. *TACL*, 12,
   1479--1496.
+- Lijewska, A., Chmiel, A., & Inhoff, A. W. (2022). Stages of sight
+  translation: Evidence from eye movements. *Applied Psycholinguistics*, 43,
+  997--1018.
 - Wilcox, E. G. et al. (2023). Testing the predictions of surprisal theory in
   11 languages. *TACL*.

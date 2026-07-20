@@ -8,6 +8,10 @@
 suppressPackageStartupMessages({library(brms); library(dplyr)})
 options(mc.cores = 4)
 
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
+repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
+source(file.path(repo_root, "R", "analysis_design.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(name, default) {
   hit <- grep(paste0("^", name, "="), args, value = TRUE)
@@ -18,15 +22,31 @@ data_dir <- normalizePath(
   get_arg("--data-dir", Sys.getenv("DISSERTATION_DATA_DIR", ".")),
   mustWork = TRUE
 )
+output_dir <- get_arg(
+  "--output-dir", Sys.getenv("DISSERTATION_OUTPUT_DIR", data_dir)
+)
 include_stoplight <- tolower(get_arg("--include-stoplight", "false")) == "true"
+exclude_contrastive <- parse_bool(
+  get_arg("--exclude-contrastive", "false"), "--exclude-contrastive"
+)
+dir.create(output_dir, recursive=TRUE, showWarnings=FALSE)
 path <- function(...) file.path(data_dir, ...)
 
-fix <- read.csv(path("fixation_durations_word.csv"), stringsAsFactors = FALSE)
-nmt <- read.csv(path("nmt_surprisal_soft_word.csv"), stringsAsFactors = FALSE)
-mono <- read.csv(path("monolingual_surprisal_word.csv"), stringsAsFactors = FALSE)
-freq <- read.table(path("subtlex_us.csv"), sep = "\t", header = TRUE,
+fix_path <- path("fixation_durations_word.csv")
+nmt_path <- path("nmt_surprisal_soft_word.csv")
+mono_path <- path("monolingual_surprisal_word.csv")
+freq_path <- path("subtlex_us.csv")
+input_hashes <- analysis_input_hashes(c(
+  fixation=fix_path, nmt_surprisal=nmt_path,
+  monolingual_surprisal=mono_path, frequency=freq_path,
+  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+))
+fix <- read.csv(fix_path, stringsAsFactors = FALSE)
+nmt <- read.csv(nmt_path, stringsAsFactors = FALSE)
+mono <- read.csv(mono_path, stringsAsFactors = FALSE)
+freq <- read.table(freq_path, sep = "\t", header = TRUE,
                    stringsAsFactors = FALSE, quote = "") %>%
-  transmute(word_lower = tolower(trimws(Word)), log10_freq = Lg10WF)
+  transmute(word_lower = lexical_form(Word), log10_freq = Lg10WF)
 
 sentence_lengths <- nmt %>%
   group_by(sentence_id) %>%
@@ -34,9 +54,9 @@ sentence_lengths <- nmt %>%
 predictors <- nmt %>%
   left_join(sentence_lengths, by = "sentence_id") %>%
   mutate(
-    word_length = nchar(word),
-    word_position = word_index / (sentence_length - 1),
-    word_lower = tolower(trimws(word))
+    word_lower = lexical_form(word),
+    word_length = nchar(word_lower, type = "chars"),
+    word_position = word_index / (sentence_length - 1)
   ) %>%
   left_join(freq, by = "word_lower") %>%
   left_join(
@@ -47,7 +67,7 @@ predictors <- nmt %>%
   select(sentence_id, word_index, word_length, word_position,
          nmt_surprisal = surprisal_soft, mono_surprisal, log10_freq)
 
-data <- fix %>%
+raw_data <- fix %>%
   filter(stage %in% c("translate", "read")) %>%
   left_join(predictors, by = c("sentence_id", "word_index")) %>%
   mutate(
@@ -57,22 +77,30 @@ data <- fix %>%
   ) %>%
   filter(!is.na(nmt_surprisal), !is.na(mono_surprisal),
          !is.na(log10_freq))
-if (!include_stoplight) {
-  data <- data %>%
-    anti_join(tibble(sentence_id = "S003", word_index = 3L),
-              by = c("sentence_id", "word_index"))
-}
+primary_reference <- raw_data %>%
+  anti_join(tibble(sentence_id = "S003", word_index = 3L),
+            by = c("sentence_id", "word_index"))
+data <- if (include_stoplight) raw_data else primary_reference
 
-z <- function(x) (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+z_from <- function(x, reference) {
+  (x - mean(reference, na.rm = TRUE)) / sd(reference, na.rm = TRUE)
+}
 data <- data %>% mutate(
-  c_nmt = z(nmt_surprisal), c_mono = z(mono_surprisal),
-  c_wlen = z(word_length), c_wpos = z(word_position),
-  c_freq = z(log10_freq)
+  c_nmt = z_from(nmt_surprisal, primary_reference$nmt_surprisal),
+  c_mono = z_from(mono_surprisal, primary_reference$mono_surprisal),
+  c_wlen = z_from(word_length, primary_reference$word_length),
+  c_wpos = z_from(word_position, primary_reference$word_position),
+  c_freq = z_from(log10_freq, primary_reference$log10_freq)
 )
+data <- apply_contrastive_sensitivity(data, exclude_contrastive)
+counts <- design_counts(data$sentence_id)
 cat(sprintf(
-  "Pooled N=%d (translate %d, read %d; stoplight %s)\n",
+  paste0("Pooled N=%d (translate %d, read %d; stoplight %s; ",
+         "sentence IDs=%d; inference clusters=%d; contrastive pair %s)\n"),
   nrow(data), sum(data$condition == 1), sum(data$condition == 0),
-  ifelse(include_stoplight, "included", "excluded")
+  ifelse(include_stoplight, "included", "excluded"),
+  counts[["n_sentence_ids"]], counts[["n_inference_clusters"]],
+  ifelse(exclude_contrastive, "excluded", "included")
 ))
 
 priors <- c(
@@ -101,10 +129,12 @@ model <- brm(
 )
 dir.create(path("brm_cache"), showWarnings = FALSE)
 cache_name <- if (include_stoplight) {
-  "rq2rob_joint_stoplight.rds"
+  "rq2rob_joint_stoplight_v2.rds"
 } else {
-  "rq2_joint_maximal_v2.rds"
+  "rq2_joint_maximal_v3.rds"
 }
+cache_name <- variant_filename(cache_name, exclude_contrastive)
+model <- set_analysis_input_hashes(model, input_hashes)
 saveRDS(model, path("brm_cache", cache_name))
 
 print(round(fixef(model), 4))
@@ -125,3 +155,23 @@ cat(sprintf(
   "Rhat max: %.4f | divergences: %d\n",
   max(rhat(model), na.rm = TRUE), divergences
 ))
+
+coefficient_output <- data.frame(
+  term=rownames(fixef(model)), fixef(model), row.names=NULL,
+  n_observations=nrow(data),
+  n_sentence_ids=counts[["n_sentence_ids"]],
+  n_inference_clusters=counts[["n_inference_clusters"]],
+  exclude_contrastive=exclude_contrastive,
+  include_stoplight=include_stoplight
+)
+base_output <- if (include_stoplight) {
+  "rq2_joint_stoplight_results.csv"
+} else {
+  "rq2_joint_maximal_results.csv"
+}
+write.csv(
+  coefficient_output,
+  file.path(output_dir,
+            variant_filename(base_output, exclude_contrastive)),
+  row.names=FALSE
+)

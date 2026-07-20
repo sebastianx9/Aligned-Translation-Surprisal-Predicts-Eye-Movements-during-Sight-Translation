@@ -7,6 +7,10 @@
 suppressPackageStartupMessages({library(brms); library(dplyr)})
 options(mc.cores = 4)
 
+script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
+repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
+source(file.path(repo_root, "R", "analysis_design.R"))
+
 args <- commandArgs(trailingOnly = TRUE)
 get_arg <- function(name, default) {
   hit <- grep(paste0("^", name, "="), args, value = TRUE)
@@ -23,14 +27,33 @@ output_dir <- get_arg(
 dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
 path <- function(...) file.path(data_dir, ...)
 
-fix <- read.csv(path("fixation_durations_word.csv"), stringsAsFactors = FALSE)
-nmt <- read.csv(path("nmt_surprisal_soft_word.csv"), stringsAsFactors = FALSE)
-mono <- read.csv(path("monolingual_surprisal_word.csv"), stringsAsFactors = FALSE)
-mass <- read.csv(path("nmt_alignment_mass_word.csv"), stringsAsFactors = FALSE)
-attn <- read.csv(path("attention_features_6_norm.csv"), stringsAsFactors = FALSE)
-freq <- read.table(path("subtlex_us.csv"), sep = "\t", header = TRUE,
+fix_path <- path("fixation_durations_word.csv")
+nmt_path <- path("nmt_surprisal_soft_word.csv")
+mono_path <- path("monolingual_surprisal_word.csv")
+mass_path <- path("nmt_alignment_mass_word.csv")
+attn_path <- path("attention_features_6_norm.csv")
+freq_path <- path("subtlex_us.csv")
+rq1_input_hashes <- analysis_input_hashes(c(
+  fixation=fix_path, nmt_surprisal=nmt_path,
+  monolingual_surprisal=mono_path, attention_features=attn_path,
+  frequency=freq_path,
+  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+))
+robustness_input_hashes <- analysis_input_hashes(c(
+  fixation=fix_path, nmt_surprisal=nmt_path,
+  monolingual_surprisal=mono_path, alignment_mass=mass_path,
+  attention_features=attn_path, frequency=freq_path,
+  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+))
+
+fix <- read.csv(fix_path, stringsAsFactors = FALSE)
+nmt <- read.csv(nmt_path, stringsAsFactors = FALSE)
+mono <- read.csv(mono_path, stringsAsFactors = FALSE)
+mass <- read.csv(mass_path, stringsAsFactors = FALSE)
+attn <- read.csv(attn_path, stringsAsFactors = FALSE)
+freq <- read.table(freq_path, sep = "\t", header = TRUE,
                    stringsAsFactors = FALSE, quote = "") %>%
-  transmute(word_lower = tolower(trimws(Word)), log10_freq = Lg10WF)
+  transmute(word_lower = lexical_form(Word), log10_freq = Lg10WF)
 
 # The mass extractor must reproduce the primary c_nmt values exactly at the
 # stored six-decimal precision.
@@ -58,9 +81,9 @@ predictors <- nmt %>%
   ) %>%
   left_join(sentence_lengths, by = "sentence_id") %>%
   mutate(
-    word_length = nchar(word),
-    word_position = word_index / (sentence_length - 1),
-    word_lower = tolower(trimws(word))
+    word_lower = lexical_form(word),
+    word_length = nchar(word_lower, type = "chars"),
+    word_position = word_index / (sentence_length - 1)
   ) %>%
   left_join(freq, by = "word_lower") %>%
   left_join(
@@ -96,16 +119,25 @@ translate_clean <- translate_all %>%
   anti_join(tibble(sentence_id = "S003", word_index = 3L),
             by = c("sentence_id", "word_index"))
 
-z <- function(x) (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
-scale_data <- function(data) {
+z_from <- function(x, reference) {
+  (x - mean(reference, na.rm = TRUE)) / sd(reference, na.rm = TRUE)
+}
+scale_data <- function(data, reference) {
   data %>% mutate(
-    c_nmt = z(nmt_surprisal), c_mass = z(alignment_mass),
-    c_wlen = z(word_length), c_wpos = z(word_position),
-    c_freq = z(log10_freq), c_mono = z(mono_surprisal)
+    c_nmt = z_from(nmt_surprisal, reference$nmt_surprisal),
+    c_mass = z_from(alignment_mass, reference$alignment_mass),
+    c_wlen = z_from(word_length, reference$word_length),
+    c_wpos = z_from(word_position, reference$word_position),
+    c_freq = z_from(log10_freq, reference$log10_freq),
+    c_mono = z_from(mono_surprisal, reference$mono_surprisal)
   )
 }
-translate_clean <- scale_data(translate_clean)
-translate_all <- scale_data(translate_all)
+# Both robustness specifications use the primary, stoplight-excluded
+# reference distribution. This keeps coefficient scales and priors identical
+# when the excluded observations are restored.
+scaling_reference <- translate_clean
+translate_clean <- scale_data(translate_clean, scaling_reference)
+translate_all <- scale_data(translate_all, scaling_reference)
 stopifnot(
   nrow(translate_clean) > 0L,
   nrow(translate_all) >= nrow(translate_clean),
@@ -130,16 +162,26 @@ make_formula <- function(extra) {
 }
 
 make_folds <- function(data) {
-  set.seed(42)
-  folds <- loo::kfold_split_grouped(K = 10, x = data$sentence_id)
+  folds <- make_sentence_folds(data$sentence_id, K = 10, seed = 42)
   stopifnot(all(tapply(folds, data$sentence_id,
                        function(x) length(unique(x))) == 1L))
+  assert_contrastive_fold_binding(folds, data$sentence_id)
   folds
 }
 
 fit_kfold <- function(name, formula, data, folds) {
-  cache_path <- file.path(cache_dir, paste0(name, ".rds"))
-  if (file.exists(cache_path)) return(readRDS(cache_path))
+  cache_path <- file.path(cache_dir, paste0(name, "_v3.rds"))
+  if (file.exists(cache_path)) {
+    cached <- readRDS(cache_path)
+    assert_analysis_input_hashes(
+      cached, robustness_input_hashes, cache_path
+    )
+    stopifnot(
+      length(cached$pointwise[, "elpd_kfold"]) == nrow(data),
+      identical(as.integer(attr(cached, "folds")), as.integer(folds))
+    )
+    return(cached)
+  }
   model <- brm(
     formula, data = data, prior = priors,
     control = list(adapt_delta = 0.95, max_treedepth = 12),
@@ -150,11 +192,12 @@ fit_kfold <- function(name, formula, data, folds) {
     model, folds = folds, chains = 4, iter = 2000, warmup = 1000,
     seed = 42, silent = 2, refresh = 0
   )
+  result <- set_analysis_input_hashes(result, robustness_input_hashes)
   saveRDS(result, cache_path)
   result
 }
 
-sign_flip <- function(sentence_delta, n_perm = 1000L) {
+sign_flip <- function(sentence_delta, n_perm = 10000L) {
   observed <- sum(sentence_delta)
   set.seed(42)
   permuted <- replicate(
@@ -167,23 +210,28 @@ sign_flip <- function(sentence_delta, n_perm = 1000L) {
 compare_kfold <- function(target, baseline, sentence_id, contrast) {
   delta <- target$pointwise[, "elpd_kfold"] -
     baseline$pointwise[, "elpd_kfold"]
-  sentence_delta <- tapply(delta, sentence_id, sum)
+  sentence_delta <- cluster_delta_sums(delta, sentence_id)
+  counts <- design_counts(sentence_id)
   tibble(
     contrast = contrast,
     delta_elpd = sum(delta),
     clustered_se = sqrt(length(sentence_delta)) * sd(sentence_delta),
     p_signflip_one_sided = sign_flip(sentence_delta),
     n_observations = length(delta),
-    n_sentences = length(sentence_delta)
+    n_sentence_ids = counts[["n_sentence_ids"]],
+    n_inference_clusters = length(sentence_delta)
   )
 }
 
 fold_clean <- make_folds(translate_clean)
-primary_cache <- path("brm_cache", "rq1kf_c_nmt.rds")
+primary_cache <- path("brm_cache", "rq1kf_v3_c_nmt.rds")
 if (file.exists(primary_cache)) {
+  primary_kfold <- readRDS(primary_cache)
+  assert_analysis_input_hashes(primary_kfold, rq1_input_hashes,
+                               primary_cache)
   stopifnot(isTRUE(all.equal(
     as.numeric(fold_clean),
-    as.numeric(attr(readRDS(primary_cache), "folds"))
+    as.numeric(attr(primary_kfold, "folds"))
   )))
 }
 
@@ -222,14 +270,21 @@ print(results)
 # Full-data coefficient checks use the same maximal random slopes as the
 # corresponding RQ1 coefficient model.
 fit_model <- function(name, formula, data) {
-  cache_path <- file.path(cache_dir, paste0(name, ".rds"))
-  if (file.exists(cache_path)) return(readRDS(cache_path))
+  cache_path <- file.path(cache_dir, paste0(name, "_v3.rds"))
+  if (file.exists(cache_path)) {
+    cached <- readRDS(cache_path)
+    assert_analysis_input_hashes(
+      cached, robustness_input_hashes, cache_path
+    )
+    return(cached)
+  }
   model <- brm(
     formula, data = data, prior = c(priors, prior(lkj(2), class = cor)),
     control = list(adapt_delta = 0.99, max_treedepth = 14),
     chains = 4, iter = 4000, warmup = 2000, seed = 42,
     silent = 2, refresh = 0
   )
+  model <- set_analysis_input_hashes(model, robustness_input_hashes)
   saveRDS(model, cache_path)
   model
 }
