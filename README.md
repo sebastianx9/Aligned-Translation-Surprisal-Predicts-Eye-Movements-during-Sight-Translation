@@ -43,9 +43,10 @@ file also reports Holm-adjusted values across the three secondary first-pass
 contrasts (FFD, GD, and go-past); the figure labels nominal values and is
 interpreted descriptively.
 
-All predictive comparisons use the same sentence-grouped 10-fold allocation,
-sentence-clustered standard errors, and sentence-level sign-flip tests. S031
-and S032 are retained as distinct sentence IDs in the mixed models but are
+Within each comparison or model family, predictive models use a shared
+sentence-grouped 10-fold allocation, sentence-clustered standard errors, and
+sentence-level sign-flip tests. S031 and S032 are retained as distinct
+sentence IDs in the mixed models but are
 kept in the same fold and treated as one cluster for predictive uncertainty,
 because they form a near-minimal contrastive pair. The primary predictive
 analyses therefore contain 200 sentence IDs and 199 inference clusters; the
@@ -196,10 +197,10 @@ Feature extraction and local validation used:
 - R 4.5.1; brms 2.23.0; loo 2.9.0; lme4 2.0.1; lmerTest 3.2.1;
   dplyr 1.2.1; posterior 1.7.0
 
-The final Bayesian refits use the CSF3 R 4.4.1 module. Their exact installed
-package versions are printed by the environment check and recorded in every
-batch log; the local R versions above should not be reported as the final CSF
-model-fitting environment.
+The final Bayesian refits use the CSF3 R 4.4.1 module. The environment check
+prints the exact installed package versions, while each batch log records its
+R session and input hashes; the local R versions above should not be reported
+as the final CSF model-fitting environment.
 
 Random seed 42 fixes the primary grouped folds and sign-flip tests. All formal
 sign-flip tests use 10,000 permutations and the finite-simulation correction
