@@ -11,8 +11,7 @@ set -euo pipefail
 module purge
 module load apps/gcc/R/4.4.1
 
-jobscript_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-repo_dir="$(cd "${jobscript_dir}/.." && pwd)"
+repo_dir="${DISSERTATION_REPO_DIR:-${SLURM_SUBMIT_DIR}}"
 
 export R_LIBS_USER="${R_LIBS_USER:-${HOME}/R/csf3-4.4}"
 mkdir -p "${R_LIBS_USER}"

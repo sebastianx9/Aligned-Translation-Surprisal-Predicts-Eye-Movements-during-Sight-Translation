@@ -14,8 +14,9 @@ data_dir="$(cd "$1" && pwd)"
 output_dir="${2:-${data_dir}/results}"
 mkdir -p "${output_dir}"
 jobscript_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_dir="$(cd "${jobscript_dir}/.." && pwd)"
 jobscript="${jobscript_dir}/csf3_analysis.sbatch"
-shared_export="ALL,DISSERTATION_DATA_DIR=${data_dir},DISSERTATION_OUTPUT_DIR=${output_dir}"
+shared_export="ALL,DISSERTATION_REPO_DIR=${repo_dir},DISSERTATION_DATA_DIR=${data_dir},DISSERTATION_OUTPUT_DIR=${output_dir}"
 
 submit() {
   local analysis="$1"
