@@ -40,7 +40,7 @@ input_hashes <- analysis_input_hashes(c(
   monolingual_surprisal=mono_path, frequency=freq_path,
   analysis_design=file.path(repo_root, "R", "analysis_design.R")
 ))
-model_path <- path("brm_cache", "rq2_joint_maximal_v3.rds")
+model_path <- path("brm_cache", "rq2_joint_maximal_v4.rds")
 model <- readRDS(model_path)
 assert_analysis_input_hashes(model, input_hashes, model_path)
 fix <- read.csv(fix_path, stringsAsFactors = FALSE)

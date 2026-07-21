@@ -43,11 +43,11 @@ freq_path <- path("subtlex_us.csv")
 attn_path <- path("attention_features_6_norm.csv")
 nmt_cache_path <- path(
   "brm_cache",
-  variant_filename("rq1kf_v3_c_nmt.rds", exclude_contrastive)
+  variant_filename("rq1kf_v4_c_nmt.rds", exclude_contrastive)
 )
 mono_cache_path <- path(
   "brm_cache",
-  variant_filename("rq1kf_v3_c_mono.rds", exclude_contrastive)
+  variant_filename("rq1kf_v4_c_mono.rds", exclude_contrastive)
 )
 
 required <- c(mono_path, nmt_path, fix_path, freq_path, attn_path,

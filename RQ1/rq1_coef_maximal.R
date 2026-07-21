@@ -3,7 +3,7 @@
 # RQ1 c_nmt coefficient, random slopes maximal for the focal predictor.
 # RE: (1 + c_nmt | participant) + (1 + c_nmt | sentence_id).
 # Reports convergence diagnostics + RE SDs so degeneracy is visible.
-suppressMessages({library(brms); library(dplyr)}); options(mc.cores=4)
+suppressMessages({library(brms); library(dplyr)}); options(mc.cores=4, warn=1)
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
 repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)

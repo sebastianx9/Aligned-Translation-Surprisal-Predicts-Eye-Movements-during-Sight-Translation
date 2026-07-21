@@ -6,7 +6,7 @@
 # RQ1/rq1_kfold_elpd.R, so the c_mono model can be reused after RQ1 finishes.
 
 suppressMessages({library(brms); library(dplyr)})
-options(mc.cores = 4)
+options(mc.cores = 4, warn = 1)
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
 repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
@@ -139,7 +139,7 @@ RE <- "(1 | participant) + (1 | sentence_id)"
 fit_kfold <- function(name, formula) {
   cache_path <- file.path(
     CACHE,
-    variant_filename(sprintf("rq1kf_v3_%s.rds", name),
+    variant_filename(sprintf("rq1kf_v4_%s.rds", name),
                      exclude_contrastive)
   )
   if (file.exists(cache_path)) {
@@ -155,11 +155,11 @@ fit_kfold <- function(name, formula) {
   model <- brm(
     formula, data = df, prior = priors,
     control = list(adapt_delta = 0.95, max_treedepth = 12),
-    chains = 4, iter = 2000, warmup = 1000, seed = 42,
+    chains = 4, iter = 4000, warmup = 2000, seed = 42,
     silent = 2, refresh = 0
   )
   result <- kfold(
-    model, folds = fold_vec, chains = 4, iter = 2000, warmup = 1000,
+    model, folds = fold_vec, chains = 4, iter = 4000, warmup = 2000,
     seed = 42, silent = 2, refresh = 0
   )
   result <- set_analysis_input_hashes(result, input_hashes)

@@ -5,7 +5,7 @@
 #   (2) c_nmt with the S003/stoplight observations restored.
 
 suppressPackageStartupMessages({library(brms); library(dplyr)})
-options(mc.cores = 4)
+options(mc.cores = 4, warn = 1)
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
 repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
@@ -170,7 +170,7 @@ make_folds <- function(data) {
 }
 
 fit_kfold <- function(name, formula, data, folds) {
-  cache_path <- file.path(cache_dir, paste0(name, "_v3.rds"))
+  cache_path <- file.path(cache_dir, paste0(name, "_v4.rds"))
   if (file.exists(cache_path)) {
     cached <- readRDS(cache_path)
     assert_analysis_input_hashes(
@@ -185,11 +185,11 @@ fit_kfold <- function(name, formula, data, folds) {
   model <- brm(
     formula, data = data, prior = priors,
     control = list(adapt_delta = 0.95, max_treedepth = 12),
-    chains = 4, iter = 2000, warmup = 1000, seed = 42,
+    chains = 4, iter = 4000, warmup = 2000, seed = 42,
     silent = 2, refresh = 0
   )
   result <- kfold(
-    model, folds = folds, chains = 4, iter = 2000, warmup = 1000,
+    model, folds = folds, chains = 4, iter = 4000, warmup = 2000,
     seed = 42, silent = 2, refresh = 0
   )
   result <- set_analysis_input_hashes(result, robustness_input_hashes)
@@ -224,7 +224,7 @@ compare_kfold <- function(target, baseline, sentence_id, contrast) {
 }
 
 fold_clean <- make_folds(translate_clean)
-primary_cache <- path("brm_cache", "rq1kf_v3_c_nmt.rds")
+primary_cache <- path("brm_cache", "rq1kf_v4_c_nmt.rds")
 if (file.exists(primary_cache)) {
   primary_kfold <- readRDS(primary_cache)
   assert_analysis_input_hashes(primary_kfold, rq1_input_hashes,
@@ -270,7 +270,7 @@ print(results)
 # Full-data coefficient checks use the same maximal random slopes as the
 # corresponding RQ1 coefficient model.
 fit_model <- function(name, formula, data) {
-  cache_path <- file.path(cache_dir, paste0(name, "_v3.rds"))
+  cache_path <- file.path(cache_dir, paste0(name, "_v4.rds"))
   if (file.exists(cache_path)) {
     cached <- readRDS(cache_path)
     assert_analysis_input_hashes(

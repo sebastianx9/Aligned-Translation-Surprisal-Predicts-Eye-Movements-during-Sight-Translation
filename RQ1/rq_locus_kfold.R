@@ -18,7 +18,7 @@ suppressMessages({
   library(brms)
   library(dplyr)
 })
-options(mc.cores = 4)
+options(mc.cores = 4, warn = 1)
 
 script_file <- sub(
   "^--file=", "",
@@ -201,7 +201,7 @@ CACHE <- file.path(DATA_DIR, "brm_cache")
 dir.create(CACHE, recursive = TRUE, showWarnings = FALSE)
 CTRL <- "c_wlen + c_wpos + c_freq + ambiguity"
 RE <- "(1 | participant) + (1 | sentence_id)"
-ANALYSIS_VERSION <- "v2"
+ANALYSIS_VERSION <- "v3"
 N_SIGN_FLIPS <- 10000L
 ANALYSIS_SEED <- 42L
 
@@ -280,12 +280,12 @@ run_family <- function(data_full, family, outcome, model_terms) {
     model <- brm(
       make_formula(extra_terms), data = data, prior = priors,
       control = list(adapt_delta = 0.95, max_treedepth = 12),
-      chains = 4, iter = 2000, warmup = 1000,
+      chains = 4, iter = 4000, warmup = 2000,
       seed = ANALYSIS_SEED, silent = 2, refresh = 0
     )
     result <- kfold(
       model, folds = folds,
-      chains = 4, iter = 2000, warmup = 1000,
+      chains = 4, iter = 4000, warmup = 2000,
       seed = ANALYSIS_SEED, silent = 2, refresh = 0
     )
     attr(result, "folds") <- as.integer(folds)

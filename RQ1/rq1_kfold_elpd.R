@@ -8,7 +8,7 @@
 # lmer 200-fold values are preserved in memory / rq1_loo_authoritative.rds.
 # ─────────────────────────────────────────────────────────────────────────────
 suppressMessages({library(brms); library(dplyr)})
-options(mc.cores = 4)
+options(mc.cores = 4, warn = 1)
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
 repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
@@ -108,7 +108,7 @@ pred_labels <- c("c_nmt","c_mono","H_e","f_e","f_eos","f_recv","f_cross")
 
 fit_kfold <- function(name, formula) {
   cache_name <- variant_filename(
-    sprintf("rq1kf_v3_%s.rds", name), exclude_contrastive
+    sprintf("rq1kf_v4_%s.rds", name), exclude_contrastive
   )
   path <- file.path(CACHE, cache_name)
   if (file.exists(path)) {
@@ -123,8 +123,8 @@ fit_kfold <- function(name, formula) {
   }
   cat(sprintf("[%s] fitting + 10-fold ...\n", name)); t0 <- proc.time()
   m  <- brm(formula, data=df, prior=priors, control=list(adapt_delta=0.95, max_treedepth=12),
-            chains=4, iter=2000, warmup=1000, seed=42, silent=2, refresh=0)
-  kf <- kfold(m, folds=fold_vec, chains=4, iter=2000, warmup=1000,
+            chains=4, iter=4000, warmup=2000, seed=42, silent=2, refresh=0)
+  kf <- kfold(m, folds=fold_vec, chains=4, iter=4000, warmup=2000,
               seed=42, silent=2, refresh=0)
   kf <- set_analysis_input_hashes(kf, input_hashes)
   saveRDS(kf, path); cat(sprintf("[%s] %.0f min\n", name, (proc.time()-t0)["elapsed"]/60)); kf

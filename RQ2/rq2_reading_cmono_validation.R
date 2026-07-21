@@ -18,9 +18,9 @@ suppressPackageStartupMessages({
   library(brms)
   library(dplyr)
 })
-options(mc.cores = 4)
+options(mc.cores = 4, warn = 1)
 
-ANALYSIS_VERSION <- "v1"
+ANALYSIS_VERSION <- "v2"
 SEED <- 42L
 K_FOLDS <- 10L
 N_SIGN_FLIPS <- 10000L
@@ -257,12 +257,12 @@ fit_kfold <- function(model_name) {
   model <- brm(
     formulae[[model_name]], data = data, prior = priors,
     control = list(adapt_delta = 0.95, max_treedepth = 12),
-    chains = 4, iter = 2000, warmup = 1000,
+    chains = 4, iter = 4000, warmup = 2000,
     seed = SEED, silent = 2, refresh = 0
   )
   result <- kfold(
     model, folds = folds,
-    chains = 4, iter = 2000, warmup = 1000,
+    chains = 4, iter = 4000, warmup = 2000,
     seed = SEED, silent = 2, refresh = 0
   )
   result <- set_analysis_input_hashes(result, input_hashes)

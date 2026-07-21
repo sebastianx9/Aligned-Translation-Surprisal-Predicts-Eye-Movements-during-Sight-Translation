@@ -262,6 +262,15 @@ Random seed 42 fixes the primary grouped folds and sign-flip tests. All formal
 sign-flip tests use 10,000 permutations and the finite-simulation correction
 $(b+1)/(B+1)$.
 
+The final sentence-grouped cross-validation fits use four chains, 4,000
+iterations per chain (2,000 warm-up), `adapt_delta = 0.95`, and
+`max_treedepth = 12`. The RQ2 joint maximal model uses four chains, 8,000
+iterations per chain (4,000 warm-up), `adapt_delta = 0.99`, and
+`max_treedepth = 15`; the longer run addresses slow mixing previously confined
+to the population and participant intercepts. Sampler warnings are emitted
+immediately beside the active model, and cache versions encode the longer
+sampling schedule so earlier short-run caches cannot be reused silently.
+
 ### CSF3 / Slurm
 
 The supplied jobs use the University of Manchester CSF3 R 4.4.1 module and

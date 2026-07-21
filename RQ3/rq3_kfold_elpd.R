@@ -6,7 +6,7 @@
 # sentence-level sign-flip permutation. Fixes the two issues in the old lmer
 # script (shared sigma(m_base); it also used the un-normalised attention file,
 # irrelevant here since only c_nmt/c_mono are reported).
-suppressMessages({library(brms); library(dplyr)}); options(mc.cores = 4)
+suppressMessages({library(brms); library(dplyr)}); options(mc.cores = 4, warn = 1)
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
 repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
@@ -114,7 +114,7 @@ run_outcome <- function(df, y, tag) {
   f<-function(rhs) as.formula(paste(y,"~",CTRL,rhs,"+",RE))
   fitkf<-function(nm,form){p<-file.path(
       CACHE,
-      variant_filename(sprintf("rq3kf_v3_%s_%s.rds",tag,nm),
+      variant_filename(sprintf("rq3kf_v4_%s_%s.rds",tag,nm),
                        exclude_contrastive)
     ); if(file.exists(p)){
       cached <- readRDS(p)
@@ -125,8 +125,8 @@ run_outcome <- function(df, y, tag) {
       )
       return(cached)
     }
-    m<-brm(form,data=df,prior=pri,control=list(adapt_delta=0.95,max_treedepth=12),chains=4,iter=2000,warmup=1000,seed=42,silent=2,refresh=0)
-    kf<-kfold(m,folds=fv,chains=4,iter=2000,warmup=1000,seed=42,silent=2,refresh=0)
+    m<-brm(form,data=df,prior=pri,control=list(adapt_delta=0.95,max_treedepth=12),chains=4,iter=4000,warmup=2000,seed=42,silent=2,refresh=0)
+    kf<-kfold(m,folds=fv,chains=4,iter=4000,warmup=2000,seed=42,silent=2,refresh=0)
     kf<-set_analysis_input_hashes(kf,input_hashes)
     saveRDS(kf,p);kf}
   pb<-fitkf("base",f(""))$pointwise[,"elpd_kfold"]

@@ -6,7 +6,7 @@
 # predictors and their stage interactions.
 
 suppressPackageStartupMessages({library(brms); library(dplyr)})
-options(mc.cores = 4)
+options(mc.cores = 4, warn = 1)
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
 repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
@@ -124,14 +124,14 @@ formula <- as.formula(paste(
 model <- brm(
   formula, data = data, prior = priors,
   control = list(adapt_delta = 0.99, max_treedepth = 15),
-  chains = 4, iter = 4000, warmup = 2000,
+  chains = 4, iter = 8000, warmup = 4000,
   seed = 42, save_pars = save_pars(all = TRUE), silent = 2, refresh = 0
 )
 dir.create(path("brm_cache"), showWarnings = FALSE)
 cache_name <- if (include_stoplight) {
-  "rq2rob_joint_stoplight_v2.rds"
+  "rq2rob_joint_stoplight_v3.rds"
 } else {
-  "rq2_joint_maximal_v3.rds"
+  "rq2_joint_maximal_v4.rds"
 }
 cache_name <- variant_filename(cache_name, exclude_contrastive)
 model <- set_analysis_input_hashes(model, input_hashes)

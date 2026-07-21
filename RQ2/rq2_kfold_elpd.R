@@ -35,7 +35,7 @@
 
 suppressMessages({library(brms); library(dplyr)})
 
-options(mc.cores = 4)
+options(mc.cores = 4, warn = 1)
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
 repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
@@ -144,10 +144,10 @@ dir.create(CACHE, showWarnings=FALSE)
 ptw <- list()   # pointwise elpd_kfold, one vector of length N per model
 kfs <- list()   # full kfold objects, kept for the official loo_compare() cross-check
 for (nm in names(forms)) {
-  # v3 also encodes the bound contrastive-pair fold allocation.
+  # v4 encodes the bound contrastive-pair allocation and longer sampling.
   path <- file.path(
     CACHE,
-    variant_filename(sprintf("kfold_v3_%s.rds", nm),
+    variant_filename(sprintf("kfold_v4_%s.rds", nm),
                      exclude_contrastive)
   )
   if (file.exists(path)) {
@@ -163,9 +163,9 @@ for (nm in names(forms)) {
     t0 <- proc.time()
     m <- brm(forms[[nm]], data=df, prior=priors,
              control=list(adapt_delta=0.95, max_treedepth=12),
-             chains=4, iter=2000, warmup=1000, seed=42,
+             chains=4, iter=4000, warmup=2000, seed=42,
              silent=2, refresh=0)
-    kf <- kfold(m, folds = fold_vec, chains = 4, iter = 2000, warmup = 1000,
+    kf <- kfold(m, folds = fold_vec, chains = 4, iter = 4000, warmup = 2000,
                 seed = 42, silent = 2, refresh = 0)
     kf <- set_analysis_input_hashes(kf, input_hashes)
     saveRDS(kf, path)

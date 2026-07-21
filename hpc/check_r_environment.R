@@ -36,6 +36,23 @@ repo_dir <- Sys.getenv(
 )
 source(file.path(repo_dir, "R", "analysis_design.R"))
 
+analysis_scripts <- file.path(repo_dir, c(
+  "RQ1/rq1_coef_maximal.R",
+  "RQ1/rq1_kfold_elpd.R",
+  "RQ1/rq1_direct_nmt_vs_mono.R",
+  "RQ1/rq1_mass_stoplight_robustness.R",
+  "RQ1/rq_locus_kfold.R",
+  "RQ2/rq2_joint_maximal.R",
+  "RQ2/rq2_beyond_kfold.R",
+  "RQ2/rq2_kfold_elpd.R",
+  "RQ2/rq2_reading_cmono_validation.R",
+  "RQ3/rq3_kfold_elpd.R"
+))
+stopifnot(all(file.exists(analysis_scripts)))
+invisible(lapply(analysis_scripts, parse))
+cat(sprintf("Parsed %d authoritative analysis scripts successfully.\n",
+            length(analysis_scripts)))
+
 required_files <- c(
   "fixation_durations_word.csv", "eye_measures_word.csv",
   "fixation_durations_word_line_diagnostics.csv",
