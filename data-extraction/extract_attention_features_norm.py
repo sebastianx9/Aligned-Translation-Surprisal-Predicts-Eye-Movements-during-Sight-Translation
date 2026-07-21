@@ -1,242 +1,347 @@
+"""Extract Lim et al. (2024) normalized source-side attention features.
+
+The feature definitions follow ``src_seq_att`` in
+ZhengWeiLim/pred-trans-difficulty-NMT at commit ``2265d5c`` and are applied to
+the Marian model's own four-beam translation. A source word is treated as one
+segment containing all of its Marian subword positions. Context excludes the
+whole segment, encoder entropy is computed over all non-special source
+positions (the word plus its context), and every feature is divided by the
+value obtained from uniform attention over the same positions.
+
+The six source-side features defined by Lim et al. are retained:
+
+* ``attn_entropy``: encoder-attention entropy from the word to the source;
+* ``attn_context``: encoder flow from the word to its context;
+* ``attn_self``: encoder flow from the word to itself;
+* ``attn_eos``: encoder flow from the word to EOS;
+* ``attn_recv``: encoder flow received by the word from its context; and
+* ``attn_cross``: decoder-to-word cross-attention flow.
+
+Layers and heads are averaged after the segment-level feature and its uniform
+dummy value have been calculated, matching Lim et al.'s released code.
 """
-Extract Lim et al. (2024) source-side attention features WITH normalization.
 
-Normalization follows Lim et al. Sec. 6: each raw feature is divided by its
-"dummy" value — the value the feature would take under uniform attention
-(a_kl = 1/N for all k,l, where N = total source sequence length).
-
-Dummy values per feature (token level):
-  H_e  (entropy renorm over ctx):   log(N_ctx)      — uniform entropy over N_ctx positions
-  f_e  (flow u → context):          N_ctx / N
-  f_eos (flow u → eos):             1 / N
-  f_recv (flow ctx → u):            N_ctx / N
-  f_cross (cross-attn sum / heads): N_tgt / N        — N_tgt = target seq len
-
-Since normalization factors are sentence-level constants, they are applied
-after word-level averaging. Raw features are identical to extract_attention_features_full.py.
-
-Output: attention_features_6_norm.csv
-"""
-
+import argparse
 import csv
 import math
-import torch
+
 import numpy as np
+import torch
 from transformers import MarianMTModel, MarianTokenizer
 
-SENTENCES_CSV = "/Users/sebastianx/eyetracked-multi-modal-translation/probes/Sentences.csv"
-OUTPUT_CSV    = "/Users/sebastianx/Dissertation_Data/attention_features_6_norm.csv"
-MODEL_NAME    = "Helsinki-NLP/opus-mt-en-cs"
 
-print(f"Loading {MODEL_NAME} …")
-tokenizer = MarianTokenizer.from_pretrained(MODEL_NAME)
-model     = MarianMTModel.from_pretrained(MODEL_NAME, output_attentions=True)
-model.eval()
-print("  Model loaded.\n")
+DEFAULT_MODEL = "Helsinki-NLP/opus-mt-en-cs"
+DEFAULT_REVISION = "2820c6a540ddc2b7c4ea4c95c39b3150bd3ac27e"
 
 
 def load_sentences(path):
     sentences = {}
-    with open(path, newline="", encoding="utf-8") as f:
-        for line in f:
+    with open(path, newline="", encoding="utf-8") as source:
+        for line in source:
             line = line.strip()
             if not line:
                 continue
-            sid, text = line.split(",", 1)
-            sentences[sid.strip()] = text.strip()
+            sentence_id, text = line.split(",", 1)
+            sentences[sentence_id.strip()] = text.strip()
     return sentences
 
 
 def subwords_to_word_map(tokens):
-    word_map, wi = [], -1
-    for tok in tokens:
-        if tok in ("<pad>", "</s>", "<unk>"):
+    """Map Marian/SentencePiece tokens to whitespace-delimited source words."""
+    word_map = []
+    word_index = -1
+    for token in tokens:
+        if token in ("<pad>", "</s>"):
             word_map.append(-1)
             continue
-        if tok.startswith("▁") or wi == -1:
-            wi += 1
-        word_map.append(wi)
+        if token.startswith("▁") or word_index == -1:
+            word_index += 1
+        word_map.append(word_index)
     return word_map
 
 
-def entropy_renorm(attn_row, ctx_indices):
-    ctx_weights = [attn_row[j] for j in ctx_indices]
-    total = sum(ctx_weights)
-    if total < 1e-9:
-        return 0.0
-    h = 0.0
-    for w in ctx_weights:
-        p = w / total
-        if p > 1e-9:
-            h -= p * math.log(p)
-    return h
+def _safe_ratio(value, dummy, label):
+    if not np.isfinite(dummy) or dummy <= 0:
+        raise ValueError(f"Uniform-attention dummy for {label} is {dummy}.")
+    result = float(value / dummy)
+    if not np.isfinite(result):
+        raise ValueError(f"Non-finite normalized value for {label}.")
+    return result
 
 
-def extract_features(sentence_text):
-    enc     = tokenizer([sentence_text], return_tensors="pt",
-                        truncation=True, max_length=128)
-    src_ids = enc["input_ids"][0]
-    src_toks = tokenizer.convert_ids_to_tokens(src_ids.tolist())
-    word_map = subwords_to_word_map(src_toks)
-    n_words  = max(wi for wi in word_map if wi >= 0) + 1
-    seq_len  = len(src_toks)                        # N (source)
+def lim_normalized_word_features(
+    encoder_attention,
+    cross_attention,
+    word_map,
+    eos_index,
+    valid_source_positions=None,
+):
+    """Compute Lim-style normalized features from stacked attention arrays.
 
-    eos_idx      = next((i for i, t in enumerate(src_toks) if t == "</s>"), None)
-    ctx_positions = {j for j, wi in enumerate(word_map) if wi >= 0}
-    N_ctx = len(ctx_positions) - 1                  # context size (excl. self)
+    Parameters
+    ----------
+    encoder_attention
+        Array with shape ``(layers, heads, source_queries, source_keys)``.
+    cross_attention
+        Array with shape ``(layers, heads, target_queries, source_keys)``.
+    word_map
+        Source-position to word-index mapping; special positions are ``-1``.
+    eos_index
+        Source position of the EOS token.
+    valid_source_positions
+        Non-padding source positions.  Uniform dummy attention is defined over
+        these positions, just as in Lim et al.'s ``dummy_attention_by_batch``.
+    """
+    encoder_attention = np.asarray(encoder_attention, dtype=np.float64)
+    cross_attention = np.asarray(cross_attention, dtype=np.float64)
+    word_map = np.asarray(word_map, dtype=np.int64)
 
-    # ── Encoder self-attention ────────────────────────────────────────────────
-    with torch.no_grad():
-        enc_out = model.model.encoder(
-            input_ids         = enc["input_ids"],
-            attention_mask    = enc["attention_mask"],
-            output_attentions = True,
+    if encoder_attention.ndim != 4 or cross_attention.ndim != 4:
+        raise ValueError("Expected four-dimensional encoder and cross attention.")
+    if encoder_attention.shape[2] != encoder_attention.shape[3]:
+        raise ValueError("Encoder attention must be square in source positions.")
+    source_length = encoder_attention.shape[3]
+    if cross_attention.shape[3] != source_length or len(word_map) != source_length:
+        raise ValueError("Attention arrays and word map disagree on source length.")
+    if not 0 <= eos_index < source_length:
+        raise ValueError("EOS index is outside the source sequence.")
+
+    if valid_source_positions is None:
+        valid_source_positions = np.arange(source_length, dtype=np.int64)
+    else:
+        valid_source_positions = np.asarray(
+            valid_source_positions, dtype=np.int64
+        )
+    if len(valid_source_positions) == 0:
+        raise ValueError("No valid source positions were supplied.")
+    if eos_index not in set(valid_source_positions.tolist()):
+        raise ValueError("EOS must be a valid, non-padding source position.")
+
+    lexical_positions = np.flatnonzero(word_map >= 0)
+    if len(lexical_positions) < 2:
+        raise ValueError("At least two lexical source positions are required.")
+    n_words = int(word_map.max()) + 1
+    if set(word_map[lexical_positions].tolist()) != set(range(n_words)):
+        raise ValueError("Word indices must be contiguous from zero.")
+
+    uniform_denominator = float(len(valid_source_positions))
+    n_target_queries = cross_attention.shape[2]
+    lexical_entropy = math.log(len(lexical_positions))
+    rows = []
+
+    for word_index in range(n_words):
+        segment = np.flatnonzero(word_map == word_index)
+        context = lexical_positions[word_map[lexical_positions] != word_index]
+        if len(segment) == 0 or len(context) == 0:
+            raise ValueError(f"Word {word_index} has no segment or context tokens.")
+
+        # Lim et al.'s H(A_e, u, x): for each query subword in u, renormalize
+        # over all lexical source positions (u plus its context), sum across
+        # the segment, then average across layers and heads.
+        lexical_rows = encoder_attention[:, :, segment, :][:, :, :, lexical_positions]
+        row_totals = lexical_rows.sum(axis=-1, keepdims=True)
+        probabilities = np.divide(
+            lexical_rows,
+            row_totals,
+            out=np.zeros_like(lexical_rows),
+            where=row_totals > 0,
+        )
+        entropy_terms = np.zeros_like(probabilities)
+        positive = probabilities > 0
+        entropy_terms[positive] = (
+            -probabilities[positive] * np.log(probabilities[positive])
+        )
+        entropy_raw = entropy_terms.sum(axis=(-2, -1)).mean()
+
+        word_to_context_raw = (
+            encoder_attention[:, :, segment, :][:, :, :, context]
+            .sum(axis=(-2, -1))
+            .mean()
+        )
+        word_to_self_raw = (
+            encoder_attention[:, :, segment, :][:, :, :, segment]
+            .sum(axis=(-2, -1))
+            .mean()
+        )
+        context_to_word_raw = (
+            encoder_attention[:, :, context, :][:, :, :, segment]
+            .sum(axis=(-2, -1))
+            .mean()
+        )
+        word_to_eos_raw = (
+            encoder_attention[:, :, segment, eos_index].sum(axis=-1).mean()
+        )
+        target_to_word_raw = (
+            cross_attention[:, :, :, segment].sum(axis=(-2, -1)).mean()
         )
 
-    n_layers = len(enc_out.attentions)
-    n_heads  = enc_out.attentions[0].shape[1]
-    count    = n_layers * n_heads
-
-    token_entropy  = [0.0] * seq_len
-    token_ctx_att  = [0.0] * seq_len
-    token_eos_att  = [0.0] * seq_len
-    token_recv_att = [0.0] * seq_len
-
-    for layer_attn in enc_out.attentions:
-        attn = layer_attn[0]
-        for h in range(n_heads):
-            for i in range(seq_len):
-                row = attn[h, i].tolist()
-                ctx_indices = [j for j in ctx_positions if j != i]
-                token_entropy[i] += entropy_renorm(row, ctx_indices)
-                token_ctx_att[i] += sum(row[j] for j in ctx_indices)
-                if eos_idx is not None:
-                    token_eos_att[i] += row[eos_idx]
-
-            for j in range(seq_len):
-                if j not in ctx_positions:
-                    continue
-                col = attn[h, :, j].tolist()
-                for i in ctx_positions:
-                    if i != j:
-                        token_recv_att[j] += col[i]
-
-    token_entropy  = [v / count for v in token_entropy]
-    token_ctx_att  = [v / count for v in token_ctx_att]
-    token_eos_att  = [v / count for v in token_eos_att]
-    token_recv_att = [v / count for v in token_recv_att]
-
-    # ── Cross-attention ───────────────────────────────────────────────────────
-    with torch.no_grad():
-        gen_ids = model.generate(
-            enc["input_ids"],
-            attention_mask = enc["attention_mask"],
-            num_beams = 4, max_length = 200,
-        )[0]
-
-    decoder_input_ids = gen_ids[:-1].unsqueeze(0)
-    N_tgt = decoder_input_ids.shape[1]              # target seq len
-
-    with torch.no_grad():
-        out = model(
-            input_ids         = enc["input_ids"],
-            attention_mask    = enc["attention_mask"],
-            decoder_input_ids = decoder_input_ids,
-            output_attentions = True,
+        segment_size = float(len(segment))
+        context_size = float(len(context))
+        dummy_entropy = segment_size * lexical_entropy
+        dummy_context = segment_size * context_size / uniform_denominator
+        dummy_self = segment_size * segment_size / uniform_denominator
+        dummy_eos = segment_size / uniform_denominator
+        dummy_cross = (
+            float(n_target_queries) * segment_size / uniform_denominator
         )
 
-    n_cross_layers = len(out.cross_attentions)
-    n_cross_heads  = out.cross_attentions[0].shape[1]
-    cross_count    = n_cross_layers * n_cross_heads
-
-    token_cross = np.zeros(seq_len)
-    for layer_ca in out.cross_attentions:
-        ca = layer_ca[0].cpu().numpy()
-        for h in range(n_cross_heads):
-            token_cross += ca[h].sum(axis=0)
-    token_cross = token_cross / cross_count
-
-    # ── Dummy values (uniform attention) ─────────────────────────────────────
-    # H_e  dummy: log(N_ctx)        — entropy of uniform dist over N_ctx positions
-    # f_e  dummy: N_ctx / seq_len
-    # f_eos dummy: 1 / seq_len
-    # f_recv dummy: N_ctx / seq_len
-    # f_cross dummy: N_tgt / seq_len
-    log_N_ctx  = math.log(max(N_ctx, 2))            # guard against N_ctx < 2
-    dummy_fe   = N_ctx / seq_len
-    dummy_feos = 1.0 / seq_len
-    dummy_recv = N_ctx / seq_len
-    dummy_fc   = N_tgt / seq_len
-
-    # ── Aggregate to word level, then normalise ───────────────────────────────
-    accum = {wi: {"entropy": 0.0, "ctx": 0.0, "eos": 0.0,
-                  "recv": 0.0, "cross": 0.0, "n": 0}
-             for wi in range(n_words)}
-
-    for tok_i, wi in enumerate(word_map):
-        if wi < 0:
-            continue
-        accum[wi]["entropy"] += token_entropy[tok_i]
-        accum[wi]["ctx"]     += token_ctx_att[tok_i]
-        accum[wi]["eos"]     += token_eos_att[tok_i]
-        accum[wi]["recv"]    += token_recv_att[tok_i]
-        accum[wi]["cross"]   += token_cross[tok_i]
-        accum[wi]["n"]       += 1
-
-    words = sentence_text.split()
-    rows  = []
-    for wi, word in enumerate(words):
-        n = accum[wi]["n"]
-        if n == 0:
-            rows.append({"word_index": wi, "word": word,
-                         "attn_entropy": None, "attn_context": None,
-                         "attn_eos": None, "attn_recv": None, "attn_cross": None})
-        else:
-            # raw word-level means
-            H_e_raw    = accum[wi]["entropy"] / n
-            f_e_raw    = accum[wi]["ctx"]     / n
-            f_eos_raw  = accum[wi]["eos"]     / n
-            f_recv_raw = accum[wi]["recv"]    / n
-            f_cross_raw= accum[wi]["cross"]   / n
-
-            # normalise: divide by dummy value
-            rows.append({
-                "word_index":   wi,
-                "word":         word,
-                "attn_entropy": round(H_e_raw    / log_N_ctx,  6),
-                "attn_context": round(f_e_raw    / dummy_fe,   6),
-                "attn_eos":     round(f_eos_raw  / dummy_feos, 6),
-                "attn_recv":    round(f_recv_raw / dummy_recv, 6),
-                "attn_cross":   round(f_cross_raw/ dummy_fc,   6),
-            })
+        rows.append(
+            {
+                "word_index": word_index,
+                "attn_entropy": _safe_ratio(
+                    entropy_raw, dummy_entropy, "attn_entropy"
+                ),
+                "attn_context": _safe_ratio(
+                    word_to_context_raw, dummy_context, "attn_context"
+                ),
+                "attn_self": _safe_ratio(
+                    word_to_self_raw, dummy_self, "attn_self"
+                ),
+                "attn_eos": _safe_ratio(
+                    word_to_eos_raw, dummy_eos, "attn_eos"
+                ),
+                "attn_recv": _safe_ratio(
+                    context_to_word_raw, dummy_context, "attn_recv"
+                ),
+                "attn_cross": _safe_ratio(
+                    target_to_word_raw, dummy_cross, "attn_cross"
+                ),
+            }
+        )
     return rows
 
 
+def extract_features(sentence_text, tokenizer, model, device):
+    encoded = tokenizer(
+        [sentence_text], return_tensors="pt", truncation=True, max_length=128
+    ).to(device)
+    source_ids = encoded["input_ids"][0]
+    source_tokens = tokenizer.convert_ids_to_tokens(source_ids.tolist())
+    word_map = subwords_to_word_map(source_tokens)
+    words = sentence_text.split()
+    mapped_words = max(word_map) + 1
+    if mapped_words != len(words):
+        raise ValueError(
+            f"Tokenizer produced {mapped_words} word segments for "
+            f"{len(words)} whitespace words: {sentence_text!r}"
+        )
+
+    eos_positions = (
+        source_ids == tokenizer.eos_token_id
+    ).nonzero(as_tuple=False).view(-1)
+    if len(eos_positions) != 1:
+        raise ValueError(f"Expected one source EOS token, found {len(eos_positions)}.")
+    eos_index = int(eos_positions.item())
+
+    with torch.no_grad():
+        generated_ids = model.generate(
+            encoded["input_ids"],
+            attention_mask=encoded["attention_mask"],
+            num_beams=4,
+            max_length=200,
+        )[0]
+    if len(generated_ids) < 2:
+        raise ValueError("Generated sequence is too short for decoder attention.")
+    decoder_input_ids = generated_ids[:-1].unsqueeze(0)
+
+    with torch.no_grad():
+        output = model(
+            input_ids=encoded["input_ids"],
+            attention_mask=encoded["attention_mask"],
+            decoder_input_ids=decoder_input_ids,
+            output_attentions=True,
+            return_dict=True,
+        )
+    if output.encoder_attentions is None or output.cross_attentions is None:
+        raise RuntimeError("The model did not return encoder and cross attention.")
+
+    encoder_attention = torch.stack(output.encoder_attentions, dim=0)[
+        :, 0
+    ].detach().cpu().numpy()
+    cross_attention = torch.stack(output.cross_attentions, dim=0)[
+        :, 0
+    ].detach().cpu().numpy()
+    valid_source_positions = (
+        encoded["attention_mask"][0].nonzero(as_tuple=False).view(-1).cpu().numpy()
+    )
+    feature_rows = lim_normalized_word_features(
+        encoder_attention=encoder_attention,
+        cross_attention=cross_attention,
+        word_map=word_map,
+        eos_index=eos_index,
+        valid_source_positions=valid_source_positions,
+    )
+    for row, word in zip(feature_rows, words):
+        row["word"] = word
+        for feature in (
+            "attn_entropy",
+            "attn_context",
+            "attn_self",
+            "attn_eos",
+            "attn_recv",
+            "attn_cross",
+        ):
+            row[feature] = round(row[feature], 6)
+    return feature_rows
+
+
 def main():
-    sentences = load_sentences(SENTENCES_CSV)
+    parser = argparse.ArgumentParser(
+        description="Extract Lim-style normalized source attention features."
+    )
+    parser.add_argument(
+        "--sentences", required=True, help="Path to EMMT Sentences.csv"
+    )
+    parser.add_argument("--output", required=True, help="Output CSV path")
+    parser.add_argument(
+        "--model", default=DEFAULT_MODEL,
+        help=f"Hugging Face model name (default: {DEFAULT_MODEL})",
+    )
+    parser.add_argument(
+        "--revision", default=DEFAULT_REVISION,
+        help="Pinned Hugging Face model revision",
+    )
+    args = parser.parse_args()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Loading {args.model} at revision {args.revision} on {device} ...")
+    tokenizer = MarianTokenizer.from_pretrained(
+        args.model, revision=args.revision
+    )
+    model = MarianMTModel.from_pretrained(
+        args.model, revision=args.revision, attn_implementation="eager"
+    )
+    model.eval()
+    model.to(device)
+
+    sentences = load_sentences(args.sentences)
     print(f"Loaded {len(sentences)} sentences.\n")
-
     all_rows = []
-    for sid in sorted(sentences.keys()):
-        text = sentences[sid]
-        print(f"  {sid}: {text[:65]}")
-        try:
-            rows = extract_features(text)
-            for r in rows:
-                r["sentence_id"] = sid
-            all_rows.extend(rows)
-        except Exception as e:
-            print(f"    ERROR: {e}")
+    for sentence_id in sorted(sentences):
+        text = sentences[sentence_id]
+        print(f"  {sentence_id}: {text[:65]}")
+        rows = extract_features(text, tokenizer, model, device)
+        for row in rows:
+            row["sentence_id"] = sentence_id
+        all_rows.extend(rows)
 
-    fields = ["sentence_id", "word_index", "word",
-              "attn_entropy", "attn_context", "attn_eos", "attn_recv", "attn_cross"]
+    expected_rows = sum(len(text.split()) for text in sentences.values())
+    keys = [(row["sentence_id"], row["word_index"]) for row in all_rows]
+    if len(all_rows) != expected_rows or len(set(keys)) != expected_rows:
+        raise RuntimeError(
+            f"Expected {expected_rows} unique word rows, produced {len(all_rows)}."
+        )
 
-    with open(OUTPUT_CSV, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fields)
+    fields = [
+        "sentence_id", "word_index", "word", "attn_entropy",
+        "attn_context", "attn_self", "attn_eos", "attn_recv",
+        "attn_cross",
+    ]
+    with open(args.output, "w", newline="", encoding="utf-8") as destination:
+        writer = csv.DictWriter(destination, fieldnames=fields)
         writer.writeheader()
         writer.writerows(all_rows)
-
-    print(f"\nDone. {len(all_rows)} word rows → {OUTPUT_CSV}")
+    print(f"\nDone. {len(all_rows)} word rows -> {args.output}")
 
 
 if __name__ == "__main__":

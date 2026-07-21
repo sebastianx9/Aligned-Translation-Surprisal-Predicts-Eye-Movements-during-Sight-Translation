@@ -18,6 +18,19 @@ export R_LIBS_USER="${R_LIBS_USER:-${HOME}/R/csf3-4.4}"
 repo_dir="${DISSERTATION_REPO_DIR:-${SLURM_SUBMIT_DIR}}"
 output_dir="${BRMS_DIAGNOSTIC_OUTPUT_DIR:-$(dirname "${BRMS_FIT_PATH}")}"
 
+actual_git_commit="$(git -C "${repo_dir}" rev-parse HEAD)"
+echo "Git commit: ${actual_git_commit}"
+if [[ -n "$(git -C "${repo_dir}" status --porcelain --untracked-files=no)" ]]; then
+  echo "Repository working tree is not clean; refusing non-reproducible diagnostics." >&2
+  git -C "${repo_dir}" status --short >&2
+  exit 2
+fi
+if [[ -n "${EXPECTED_GIT_COMMIT:-}" && \
+      "${actual_git_commit}" != "${EXPECTED_GIT_COMMIT}" ]]; then
+  echo "Repository changed after submission: expected ${EXPECTED_GIT_COMMIT}, got ${actual_git_commit}" >&2
+  exit 2
+fi
+
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1

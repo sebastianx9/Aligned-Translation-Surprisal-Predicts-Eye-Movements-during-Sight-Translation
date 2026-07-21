@@ -190,6 +190,26 @@ attn <- read.csv(
   file.path(data_dir, "attention_features_6_norm.csv"),
   stringsAsFactors = FALSE
 )
+required_attention_columns <- c(
+  "sentence_id", "word_index", "word", "attn_entropy", "attn_context",
+  "attn_self", "attn_eos", "attn_recv", "attn_cross"
+)
+missing_attention_columns <- setdiff(required_attention_columns, names(attn))
+if (length(missing_attention_columns)) {
+  stop(
+    "attention_features_6_norm.csv is not the six-feature Lim-style file; ",
+    "missing columns: ", paste(missing_attention_columns, collapse=", ")
+  )
+}
+attention_values <- as.matrix(attn[
+  c("attn_entropy", "attn_context", "attn_self", "attn_eos",
+    "attn_recv", "attn_cross")
+])
+stopifnot(
+  nrow(attn) == 2168L,
+  !anyDuplicated(attn[c("sentence_id", "word_index")]),
+  all(is.finite(attention_values))
+)
 freq <- read.table(
   file.path(data_dir, "subtlex_us.csv"), sep = "\t", header = TRUE,
   stringsAsFactors = FALSE, quote = ""
@@ -216,7 +236,7 @@ predictors <- nmt %>%
   left_join(
     attn %>% select(
       sentence_id, word_index, H_e = attn_entropy,
-      f_e = attn_context, f_eos = attn_eos,
+      f_e = attn_context, f_self = attn_self, f_eos = attn_eos,
       f_recv = attn_recv, f_cross = attn_cross
     ),
     by = c("sentence_id", "word_index")
@@ -227,7 +247,7 @@ primary <- fix %>%
   left_join(predictors, by = c("sentence_id", "word_index")) %>%
   filter(
     !is.na(surprisal_soft), !is.na(mono_surprisal), !is.na(log10_freq),
-    !is.na(H_e), !is.na(f_e), !is.na(f_eos), !is.na(f_recv),
+    !is.na(H_e), !is.na(f_e), !is.na(f_self), !is.na(f_eos), !is.na(f_recv),
     !is.na(f_cross)
   ) %>%
   anti_join(tibble(sentence_id = "S003", word_index = 3L),

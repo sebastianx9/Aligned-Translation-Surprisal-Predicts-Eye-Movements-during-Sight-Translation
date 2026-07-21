@@ -1,11 +1,13 @@
 #!/usr/bin/env Rscript
 
-# RQ3 brms kfold elpd — c_nmt / c_mono on FFD, GD, go-past, and conditional RRT.
-# Bayesian replacement for the lmer two-stage LOO-CV. Same convention as
-# rq1_kfold_elpd.R: 10-fold sentence-grouped elpd, sentence-clustered SE,
-# sentence-level sign-flip permutation. Fixes the two issues in the old lmer
-# script (shared sigma(m_base); it also used the un-normalised attention file,
-# irrelevant here since only c_nmt/c_mono are reported).
+# RQ3 phase profile on FFD, GD, go-past, and conditional RRT.
+#
+# The focal predictive contrast locates the overall c_nmt association:
+#   controls + c_nmt  versus  controls.
+# Full-data c_nmt coefficient models with focal random slopes provide direction
+# and effect-size estimates; an ELPD gain alone does not identify the sign of
+# the association. Comparisons conditional on c_mono belong to RQ1/RQ2 rather
+# than this phase-localisation analysis.
 suppressMessages({library(brms); library(dplyr)}); options(mc.cores = 4, warn = 1)
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
@@ -30,17 +32,16 @@ dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
 
 eye_path <- file.path(DATA_DIR, "eye_measures_word.csv")
 nmt_path <- file.path(DATA_DIR, "nmt_surprisal_soft_word.csv")
-mono_path <- file.path(DATA_DIR, "monolingual_surprisal_word.csv")
 freq_path <- file.path(DATA_DIR, "subtlex_us.csv")
 input_hashes <- analysis_input_hashes(c(
   eye_measures=eye_path, nmt_surprisal=nmt_path,
-  monolingual_surprisal=mono_path, frequency=freq_path,
-  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+  frequency=freq_path,
+  analysis_design=file.path(repo_root, "R", "analysis_design.R"),
+  analysis_script=file.path(repo_root, "RQ3", "rq3_kfold_elpd.R")
 ))
 
 em   <- read.csv(eye_path,  stringsAsFactors=FALSE)
 nmt  <- read.csv(nmt_path,  stringsAsFactors=FALSE)
-mono <- read.csv(mono_path, stringsAsFactors=FALSE)
 freq <- read.table(freq_path, sep="\t", header=TRUE,
                    stringsAsFactors=FALSE, quote="") %>%
   transmute(word_lower=lexical_form(Word),log10_freq=Lg10WF)
@@ -61,15 +62,16 @@ pred <- nmt %>% left_join(sl,by="sentence_id") %>%
   mutate(word_lower=lexical_form(word),word_length=nchar(word_lower, type="chars"),
          word_position=word_index/(sent_len-1)) %>%
   left_join(freq,by="word_lower") %>%
-  left_join(mono %>% select(sentence_id,word_index,mono_surprisal=surprisal_sum),by=c("sentence_id","word_index")) %>%
-  select(sentence_id,word_index,word_length,word_position,log10_freq,nmt_surprisal=surprisal_soft,mono_surprisal)
+  select(sentence_id,word_index,word_length,word_position,log10_freq,
+         nmt_surprisal=surprisal_soft)
 base_df <- em %>% filter(stage=="translate") %>% left_join(pred,by=c("sentence_id","word_index")) %>%
   mutate(ambiguity=factor(ambiguity)) %>%
-  filter(!is.na(nmt_surprisal),!is.na(mono_surprisal),!is.na(log10_freq)) %>%
+  filter(!is.na(nmt_surprisal),!is.na(log10_freq)) %>%
   anti_join(data.frame(sentence_id="S003",word_index=3L),by=c("sentence_id","word_index"))
 z<-function(x)(x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)
-base_df <- base_df %>% mutate(c_nmt=z(nmt_surprisal),c_mono=z(mono_surprisal),
-                              c_wlen=z(word_length),c_wpos=z(word_position),c_freq=z(log10_freq))
+base_df <- base_df %>% mutate(c_nmt=z(nmt_surprisal),
+                              c_wlen=z(word_length),c_wpos=z(word_position),
+                              c_freq=z(log10_freq))
 if (any(
   !is.na(base_df$go_past_ms) &
     (!is.finite(base_df$go_past_ms) | base_df$go_past_ms <= 0)
@@ -94,6 +96,7 @@ cat(sprintf("FFD n=%d  GD n=%d  go-past n=%d  conditional RRT n=%d\n",
             nrow(df_ffd), nrow(df_gd), nrow(df_go_past), nrow(df_rrt)))
 
 pri<-c(prior(normal(0,1),class=b),prior(normal(6,1),class=Intercept),prior(exponential(1),class=sd),prior(exponential(1),class=sigma))
+coef_pri <- c(pri, prior(lkj(2), class=cor))
 CACHE<-file.path(DATA_DIR,"brm_cache"); dir.create(CACHE, showWarnings=FALSE)
 CTRL<-"c_wlen+c_wpos+c_freq+ambiguity"; RE<-"(1|participant)+(1|sentence_id)"
 sfp<-function(ds,n=10000){o<-sum(ds);set.seed(42)
@@ -114,7 +117,7 @@ run_outcome <- function(df, y, tag) {
   f<-function(rhs) as.formula(paste(y,"~",CTRL,rhs,"+",RE))
   fitkf<-function(nm,form){p<-file.path(
       CACHE,
-      variant_filename(sprintf("rq3kf_v4_%s_%s.rds",tag,nm),
+      variant_filename(sprintf("rq3kf_v6_%s_%s.rds",tag,nm),
                        exclude_contrastive)
     ); if(file.exists(p)){
       cached <- readRDS(p)
@@ -129,28 +132,111 @@ run_outcome <- function(df, y, tag) {
     kf<-kfold(m,folds=fv,chains=4,iter=4000,warmup=2000,seed=42,silent=2,refresh=0)
     kf<-set_analysis_input_hashes(kf,input_hashes)
     saveRDS(kf,p);kf}
-  pb<-fitkf("base",f(""))$pointwise[,"elpd_kfold"]
-  res<-data.frame(outcome=tag,predictor=c("c_nmt","c_mono"),elpd_diff=NA,
-                  se_cluster=NA,p=NA,n_observations=N,n_sentence_ids=J,
-                  n_inference_clusters=G)
-  for(k in 1:2){v<-c("c_nmt","c_mono")[k]; pt<-fitkf(v,f(paste("+",v)))$pointwise[,"elpd_kfold"]
-    di<-pt-pb; ds<-cluster_delta_sums(di,sid); res[k,3:5]<-c(sum(di),sd(ds)*sqrt(G),sfp(ds))}
-  res
+  pointwise <- list(
+    base = fitkf("base", f(""))$pointwise[,"elpd_kfold"],
+    c_nmt = fitkf("c_nmt", f("+ c_nmt"))$pointwise[,"elpd_kfold"]
+  )
+  compare <- function(contrast, target, baseline, role) {
+    di <- pointwise[[target]] - pointwise[[baseline]]
+    ds <- cluster_delta_sums(di, sid)
+    data.frame(
+      outcome=tag, contrast=contrast,
+      focal_predictor=sub("_(unique|total)$", "", contrast),
+      target_model=target, baseline_model=baseline, role=role,
+      elpd_diff=sum(di), se_cluster=sd(ds)*sqrt(G),
+      ci_95_low=sum(di)-1.96*sd(ds)*sqrt(G),
+      ci_95_high=sum(di)+1.96*sd(ds)*sqrt(G), p=sfp(ds),
+      n_observations=N, n_sentence_ids=J, n_inference_clusters=G,
+      n_permutations=10000L, seed=42L,
+      stringsAsFactors=FALSE
+    )
+  }
+  predictive <- compare("c_nmt_total", "c_nmt", "base", "focal")
+
+  coefficient_formula <- as.formula(paste(
+    y, "~", CTRL, "+ c_nmt +",
+    "(1 + c_nmt | participant) + (1 + c_nmt | sentence_id)"
+  ))
+  coefficient_path <- file.path(
+    CACHE,
+    variant_filename(sprintf("rq3coef_v3_total_%s.rds", tag),
+                     exclude_contrastive)
+  )
+  if (file.exists(coefficient_path)) {
+    coefficient_model <- readRDS(coefficient_path)
+    assert_analysis_input_hashes(
+      coefficient_model, input_hashes, coefficient_path
+    )
+    stopifnot(nrow(coefficient_model$data) == N)
+  } else {
+    coefficient_model <- brm(
+      coefficient_formula, data=df, prior=coef_pri,
+      control=list(adapt_delta=0.99,max_treedepth=14),
+      chains=4,iter=4000,warmup=2000,seed=42,silent=2,refresh=0
+    )
+    coefficient_model <- set_analysis_input_hashes(
+      coefficient_model, input_hashes
+    )
+    saveRDS(coefficient_model, coefficient_path)
+  }
+  fixed <- fixef(coefficient_model)
+  keep_terms <- intersect("c_nmt", rownames(fixed))
+  stopifnot(identical(keep_terms, "c_nmt"))
+  parameter_names <- paste0("b_", keep_terms)
+  fixed_diagnostics <- posterior::summarise_draws(
+    posterior::as_draws_array(
+      coefficient_model, variable=parameter_names
+    ),
+    "rhat", "ess_bulk", "ess_tail"
+  )
+  fixed_diagnostics <- as.data.frame(fixed_diagnostics)
+  stopifnot(all(parameter_names %in% fixed_diagnostics$variable))
+  fixed_diagnostics <- fixed_diagnostics[
+    match(parameter_names, fixed_diagnostics$variable),,
+    drop=FALSE
+  ]
+  sampler_parameters <- nuts_params(coefficient_model)
+  divergences <- sum(
+    subset(sampler_parameters, Parameter=="divergent__")$Value
+  )
+  treedepth_hits <- sum(
+    subset(sampler_parameters, Parameter=="treedepth__")$Value >= 14
+  )
+  energy <- subset(sampler_parameters, Parameter=="energy__")
+  bfmi_by_chain <- tapply(
+    energy$Value, energy$Chain,
+    function(values) mean(diff(values)^2) / stats::var(values)
+  )
+  coefficients <- data.frame(
+    outcome=tag, term=keep_terms, fixed[keep_terms,,drop=FALSE],
+    Rhat=fixed_diagnostics$rhat,
+    Bulk_ESS=fixed_diagnostics$ess_bulk,
+    Tail_ESS=fixed_diagnostics$ess_tail,
+    n_observations=N, n_sentence_ids=J, n_inference_clusters=G,
+    max_rhat=max(rhat(coefficient_model),na.rm=TRUE),
+    divergences=divergences, treedepth_hits=treedepth_hits,
+    min_bfmi=min(bfmi_by_chain, na.rm=TRUE),
+    row.names=NULL, check.names=FALSE
+  )
+  list(predictive=predictive, coefficients=coefficients,
+       pointwise=pointwise, folds=fv, sentence_id=sid)
 }
-r_ffd <- run_outcome(df_ffd, "log_ffd", "FFD")
-r_gd  <- run_outcome(df_gd,  "log_gd",  "GD")
-r_go_past <- run_outcome(df_go_past, "log_go_past", "Go-past")
-r_rrt <- run_outcome(df_rrt, "log_rrt", "RRT")
-res <- rbind(r_ffd, r_gd, r_go_past, r_rrt)
+outcomes <- list(
+  FFD=run_outcome(df_ffd, "log_ffd", "FFD"),
+  GD=run_outcome(df_gd, "log_gd", "GD"),
+  Go_past=run_outcome(df_go_past, "log_go_past", "Go-past"),
+  RRT=run_outcome(df_rrt, "log_rrt", "RRT")
+)
+res <- bind_rows(lapply(outcomes, `[[`, "predictive"))
+coefficient_results <- bind_rows(lapply(outcomes, `[[`, "coefficients"))
 res$exclude_contrastive <- exclude_contrastive
 res$p_holm_secondary <- NA_real_
-for (current_predictor in unique(res$predictor)) {
-  secondary_rows <- res$predictor == current_predictor &
-    res$outcome %in% c("FFD", "GD", "Go-past")
-  res$p_holm_secondary[secondary_rows] <- p.adjust(
-    res$p[secondary_rows], method="holm"
-  )
-}
+secondary_rows <- res$contrast == "c_nmt_total" &
+  res$outcome %in% c("FFD", "GD", "Go-past")
+res$p_holm_secondary[secondary_rows] <- p.adjust(
+  res$p[secondary_rows], method="holm"
+)
+coefficient_results$exclude_contrastive <- exclude_contrastive
 attr(res, "outcome_definitions") <- c(
   FFD="first fixation duration on a word's first encounter",
   GD="gaze duration during a word's first encounter",
@@ -161,10 +247,34 @@ attr(res, "outcome_definitions") <- c(
   ),
   RRT="re-reading duration conditional on at least one post-first-encounter fixation"
 )
-res <- set_analysis_input_hashes(res, input_hashes)
-saveRDS(res, file.path(
+output <- list(
+  predictive=res,
+  coefficients=coefficient_results,
+  pointwise=lapply(outcomes, `[[`, "pointwise"),
+  folds=lapply(outcomes, `[[`, "folds"),
+  sentence_id=lapply(outcomes, `[[`, "sentence_id"),
+  exclude_contrastive=exclude_contrastive,
+  input_hashes=input_hashes,
+  outcome_definitions=attr(res, "outcome_definitions")
+)
+output <- set_analysis_input_hashes(output, input_hashes)
+saveRDS(output, file.path(
   OUT, variant_filename("rq3_kfold_elpd.rds", exclude_contrastive)
 ))
-cat("=== RQ3 brms kfold elpd (FFD, GD, go-past, conditional RRT) ===\n")
+write.csv(
+  res,
+  file.path(OUT, variant_filename("rq3_kfold_elpd_results.csv",
+                                  exclude_contrastive)),
+  row.names=FALSE
+)
+write.csv(
+  coefficient_results,
+  file.path(OUT, variant_filename("rq3_coefficient_results.csv",
+                                  exclude_contrastive)),
+  row.names=FALSE
+)
+cat("=== RQ3 phase-localising c_nmt predictive contrasts ===\n")
 print(format(res, digits=3))
+cat("\n=== RQ3 c_nmt coefficient estimates ===\n")
+print(format(coefficient_results, digits=3))
 cat("DONE\n")

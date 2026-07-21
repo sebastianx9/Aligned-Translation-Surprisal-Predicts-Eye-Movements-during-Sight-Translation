@@ -61,7 +61,8 @@ input_hashes <- analysis_input_hashes(c(
   nmt_surprisal = nmt_path,
   monolingual_surprisal = mono_path,
   frequency = freq_path,
-  analysis_design = design_path
+  analysis_design = design_path,
+  analysis_script = file.path(repo_root, "RQ1", "rq_locus_kfold.R")
 ))
 
 fix <- read.csv(fix_path, stringsAsFactors = FALSE)

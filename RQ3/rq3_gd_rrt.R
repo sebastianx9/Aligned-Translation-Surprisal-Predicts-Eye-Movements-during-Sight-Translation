@@ -1,9 +1,10 @@
 # ── RQ3: c_nmt outcome profile (vertical dot-and-error-bar) ─────────────────
 # FFD, GD, go-past, and conditional RRT come from the regenerated primary
 # RQ3 result;
-# TFD comes from the corresponding primary RQ1 comparison. --data-dir contains
-# both RDS files and --output-dir receives the PDF. Error bars are +-1.96
-# sentence-clustered SE; fill denotes the nominal one-sided p-value.
+# TFD comes from the matching RQ1 c_nmt-minus-controls comparison. --data-dir
+# contains both RDS files and --output-dir receives the PDF. Error bars are
+# +-1.96 sentence-clustered SE. Fill uses the primary RRT p-value, the
+# Holm-adjusted secondary p-values, and the RQ1 TFD p-value.
 
 suppressMessages({library(dplyr); library(ggplot2)})
 
@@ -34,11 +35,16 @@ if (length(missing_results)) {
   stop("Missing regenerated result files: ",
        paste(missing_results, collapse=", "))
 }
-rq3 <- readRDS(rq3_path)
+rq3_object <- readRDS(rq3_path)
+if (!is.list(rq3_object) || is.null(rq3_object$predictive)) {
+  stop("RQ3 result predates the phase-localisation analysis.")
+}
+rq3 <- rq3_object$predictive
 rq1 <- readRDS(rq1_path)
 
 rq3_required <- c(
-  "outcome", "predictor", "elpd_diff", "se_cluster", "p",
+  "outcome", "contrast", "elpd_diff", "se_cluster", "p",
+  "p_holm_secondary",
   "n_observations", "n_sentence_ids", "n_inference_clusters",
   "exclude_contrastive"
 )
@@ -73,7 +79,13 @@ if (!identical(as.integer(rq1$J), 200L) ||
 }
 
 rq3_cnmt <- rq3 %>%
-  filter(predictor == "c_nmt", outcome %in% c("FFD", "GD", "Go-past", "RRT"))
+  filter(contrast == "c_nmt_total",
+         outcome %in% c("FFD", "GD", "Go-past", "RRT")) %>%
+  mutate(
+    inference_p=ifelse(
+      outcome %in% c("FFD", "GD", "Go-past"), p_holm_secondary, p
+    )
+  )
 stopifnot(
   nrow(rq3_cnmt) == 4L,
   !anyDuplicated(rq3_cnmt$outcome),
@@ -90,17 +102,17 @@ stopifnot(nrow(rq1_cnmt) == 1L)
 
 df <- bind_rows(
   rq3_cnmt %>% transmute(
-    outcome, dllh=elpd_diff, se=se_cluster, nominal_p=p,
+    outcome, dllh=elpd_diff, se=se_cluster, inference_p,
     n_observations, n_inference_clusters
   ),
   rq1_cnmt %>% transmute(
-    outcome="TFD", dllh=elpd_diff, se=se_cluster, nominal_p=p,
+    outcome="TFD", dllh=elpd_diff, se=se_cluster, inference_p=p,
     n_observations=rq1$N, n_inference_clusters=rq1$G
   )
 ) %>%
   mutate(
     outcome=factor(outcome, levels=c("FFD", "GD", "Go-past", "RRT", "TFD")),
-    significant=nominal_p < .05,
+    significant=inference_p < .05,
     lo=dllh - 1.96 * se,
     hi=dllh + 1.96 * se
   ) %>%
@@ -114,7 +126,7 @@ p <- ggplot(df, aes(x=outcome, y=dllh)) +
              size=3.8, stroke=1.2) +
   scale_fill_manual(
     values=c(`TRUE`="#0072B2", `FALSE`="white"),
-    labels=c(`TRUE`="Nominal p < .05", `FALSE`="Nominal p >= .05"),
+    labels=c(`TRUE`="Inference p < .05", `FALSE`="Inference p >= .05"),
     name=NULL
   ) +
   labs(x = NULL, y = expression("elpd"[diff])) +

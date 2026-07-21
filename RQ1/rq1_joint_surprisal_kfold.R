@@ -41,7 +41,9 @@ input_hashes <- analysis_input_hashes(c(
   fixation=fix_path, nmt_surprisal=nmt_path,
   monolingual_surprisal=mono_path, attention_features=attn_path,
   frequency=freq_path,
-  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+  analysis_design=file.path(repo_root, "R", "analysis_design.R"),
+  rq1_kfold_script=file.path(repo_root, "RQ1", "rq1_kfold_elpd.R"),
+  rq1_joint_script=file.path(repo_root, "RQ1", "rq1_joint_surprisal_kfold.R")
 ))
 
 fix <- read.csv(fix_path, stringsAsFactors = FALSE)
@@ -74,7 +76,7 @@ predictors <- nmt %>%
   left_join(
     attn %>% select(
       sentence_id, word_index, H_e = attn_entropy,
-      f_e = attn_context, f_eos = attn_eos,
+      f_e = attn_context, f_self = attn_self, f_eos = attn_eos,
       f_recv = attn_recv, f_cross = attn_cross
     ),
     by = c("sentence_id", "word_index")
@@ -82,7 +84,7 @@ predictors <- nmt %>%
   select(
     sentence_id, word_index, word_length, word_position, log10_freq,
     nmt_surprisal = surprisal_soft, mono_surprisal,
-    H_e, f_e, f_eos, f_recv, f_cross
+    H_e, f_e, f_self, f_eos, f_recv, f_cross
   )
 
 df <- fix %>%
@@ -94,7 +96,7 @@ df <- fix %>%
   ) %>%
   filter(
     !is.na(nmt_surprisal), !is.na(mono_surprisal), !is.na(log10_freq),
-    !is.na(H_e), !is.na(f_e), !is.na(f_eos), !is.na(f_recv),
+    !is.na(H_e), !is.na(f_e), !is.na(f_self), !is.na(f_eos), !is.na(f_recv),
     !is.na(f_cross)
   ) %>%
   anti_join(tibble(sentence_id = "S003", word_index = 3L),
@@ -243,6 +245,13 @@ comparisons <- list(
 )
 results <- bind_rows(lapply(comparisons, `[[`, "result"))
 cluster_results <- bind_rows(lapply(comparisons, `[[`, "clusters"))
+results$p_signflip_one_sided_holm_unique <- NA_real_
+unique_rows <- results$contrast %in% c(
+  "M_both - M_mono", "M_both - M_nmt"
+)
+results$p_signflip_one_sided_holm_unique[unique_rows] <- p.adjust(
+  results$p_signflip_one_sided[unique_rows], method = "holm"
+)
 
 results_name <- variant_filename(
   "rq1_joint_surprisal_results.csv", exclude_contrastive

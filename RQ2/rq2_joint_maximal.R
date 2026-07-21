@@ -39,7 +39,8 @@ freq_path <- path("subtlex_us.csv")
 input_hashes <- analysis_input_hashes(c(
   fixation=fix_path, nmt_surprisal=nmt_path,
   monolingual_surprisal=mono_path, frequency=freq_path,
-  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+  analysis_design=file.path(repo_root, "R", "analysis_design.R"),
+  analysis_script=file.path(repo_root, "RQ2", "rq2_joint_maximal.R")
 ))
 fix <- read.csv(fix_path, stringsAsFactors = FALSE)
 nmt <- read.csv(nmt_path, stringsAsFactors = FALSE)
@@ -148,6 +149,27 @@ stage_slopes <- hypothesis(
   )
 )
 print(stage_slopes)
+stage_slope_output <- data.frame(
+  slope=rownames(stage_slopes$hypothesis),
+  stage_slopes$hypothesis,
+  row.names=NULL,
+  check.names=FALSE
+)
+write.csv(
+  stage_slope_output,
+  file.path(
+    output_dir,
+    variant_filename(
+      if (include_stoplight) {
+        "rq2_joint_stoplight_stage_slopes.csv"
+      } else {
+        "rq2_joint_stage_slopes.csv"
+      },
+      exclude_contrastive
+    )
+  ),
+  row.names=FALSE
+)
 divergences <- sum(
   subset(nuts_params(model), Parameter == "divergent__")$Value
 )

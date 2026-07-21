@@ -37,13 +37,18 @@ rq1_input_hashes <- analysis_input_hashes(c(
   fixation=fix_path, nmt_surprisal=nmt_path,
   monolingual_surprisal=mono_path, attention_features=attn_path,
   frequency=freq_path,
-  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+  analysis_design=file.path(repo_root, "R", "analysis_design.R"),
+  rq1_kfold_script=file.path(repo_root, "RQ1", "rq1_kfold_elpd.R"),
+  rq1_joint_script=file.path(repo_root, "RQ1", "rq1_joint_surprisal_kfold.R")
 ))
 robustness_input_hashes <- analysis_input_hashes(c(
   fixation=fix_path, nmt_surprisal=nmt_path,
   monolingual_surprisal=mono_path, alignment_mass=mass_path,
   attention_features=attn_path, frequency=freq_path,
-  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+  analysis_design=file.path(repo_root, "R", "analysis_design.R"),
+  robustness_script=file.path(
+    repo_root, "RQ1", "rq1_mass_stoplight_robustness.R"
+  )
 ))
 
 fix <- read.csv(fix_path, stringsAsFactors = FALSE)
@@ -94,19 +99,20 @@ predictors <- nmt %>%
   left_join(
     attn %>% select(sentence_id, word_index,
                     H_e = attn_entropy, f_e = attn_context,
-                    f_eos = attn_eos, f_recv = attn_recv,
+                    f_self = attn_self, f_eos = attn_eos,
+                    f_recv = attn_recv,
                     f_cross = attn_cross),
     by = c("sentence_id", "word_index")
   ) %>%
   select(
     sentence_id, word_index, word_length, word_position, log10_freq,
     nmt_surprisal = surprisal_soft, mono_surprisal, alignment_mass,
-    surprisal_per_mass, H_e, f_e, f_eos, f_recv, f_cross
+    surprisal_per_mass, H_e, f_e, f_self, f_eos, f_recv, f_cross
   )
 
 required_predictors <- c(
   "nmt_surprisal", "mono_surprisal", "alignment_mass",
-  "surprisal_per_mass", "log10_freq", "H_e", "f_e", "f_eos",
+  "surprisal_per_mass", "log10_freq", "H_e", "f_e", "f_self", "f_eos",
   "f_recv", "f_cross"
 )
 translate_all <- fix %>%
@@ -225,15 +231,19 @@ compare_kfold <- function(target, baseline, sentence_id, contrast) {
 
 fold_clean <- make_folds(translate_clean)
 primary_cache <- path("brm_cache", "rq1kf_v4_c_nmt.rds")
-if (file.exists(primary_cache)) {
-  primary_kfold <- readRDS(primary_cache)
-  assert_analysis_input_hashes(primary_kfold, rq1_input_hashes,
-                               primary_cache)
-  stopifnot(isTRUE(all.equal(
-    as.numeric(fold_clean),
-    as.numeric(attr(primary_kfold, "folds"))
-  )))
+if (!file.exists(primary_cache)) {
+  stop(
+    "Missing primary RQ1 c_nmt cache despite the afterok dependency: ",
+    primary_cache
+  )
 }
+primary_kfold <- readRDS(primary_cache)
+assert_analysis_input_hashes(primary_kfold, rq1_input_hashes,
+                             primary_cache)
+stopifnot(isTRUE(all.equal(
+  as.numeric(fold_clean),
+  as.numeric(attr(primary_kfold, "folds"))
+)))
 
 kf_mass <- fit_kfold(
   "rq1rob_mass_base", make_formula("+ c_mass"),

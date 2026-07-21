@@ -63,7 +63,8 @@ freq_path <- file.path(DATA_DIR, "subtlex_us.csv")
 input_hashes <- analysis_input_hashes(c(
   fixation=fix_path, nmt_surprisal=nmt_path,
   monolingual_surprisal=mono_path, frequency=freq_path,
-  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+  analysis_design=file.path(repo_root, "R", "analysis_design.R"),
+  analysis_script=file.path(repo_root, "RQ2", "rq2_interaction_kfold.R")
 ))
 
 fix  <- read.csv(fix_path, stringsAsFactors=FALSE)

@@ -63,7 +63,10 @@ input_hashes <- analysis_input_hashes(c(
   nmt_surprisal = nmt_path,
   monolingual_surprisal = mono_path,
   frequency = frequency_path,
-  analysis_design = helper_path
+  analysis_design = helper_path,
+  analysis_script = file.path(
+    repo_root, "RQ2", "rq2_reading_cmono_validation.R"
+  )
 ))
 
 fixations <- read.csv(fixation_path, stringsAsFactors = FALSE)

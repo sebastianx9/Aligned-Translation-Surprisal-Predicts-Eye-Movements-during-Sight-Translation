@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# ── RQ1 brms kfold elpd — 7 predictors vs baseline, TRANSLATE stage ───────────
+# ── RQ1 brms kfold elpd — 8 predictors vs baseline, TRANSLATE stage ───────────
 # Bayesian replacement for the lmer 200-fold Table 3. Same convention as
 # the RQ2 interaction check: sentence-grouped 10-fold (shared folds),
 # per-model pointwise elpd, sentence-clustered SE (NOT loo_compare's se_diff),
@@ -41,7 +41,9 @@ input_hashes <- analysis_input_hashes(c(
   fixation=fix_path, nmt_surprisal=nmt_path,
   monolingual_surprisal=mono_path, attention_features=attn_path,
   frequency=freq_path,
-  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+  analysis_design=file.path(repo_root, "R", "analysis_design.R"),
+  rq1_kfold_script=file.path(repo_root, "RQ1", "rq1_kfold_elpd.R"),
+  rq1_joint_script=file.path(repo_root, "RQ1", "rq1_joint_surprisal_kfold.R")
 ))
 
 fix  <- read.csv(fix_path,  stringsAsFactors=FALSE)
@@ -59,23 +61,28 @@ pred <- nmt %>% left_join(sl, by="sentence_id") %>%
   left_join(freq, by="word_lower") %>%
   left_join(mono %>% select(sentence_id, word_index, mono_surprisal=surprisal_sum),
             by=c("sentence_id","word_index")) %>%
-  left_join(attn %>% select(sentence_id, word_index, H_e=attn_entropy, f_e=attn_context,
-                            f_eos=attn_eos, f_recv=attn_recv, f_cross=attn_cross),
+  left_join(attn %>% select(sentence_id, word_index, H_e=attn_entropy,
+                            f_e=attn_context, f_self=attn_self,
+                            f_eos=attn_eos, f_recv=attn_recv,
+                            f_cross=attn_cross),
             by=c("sentence_id","word_index")) %>%
   select(sentence_id, word_index, word_length, word_position, log10_freq,
-         nmt_surprisal=surprisal_soft, mono_surprisal, H_e, f_e, f_eos, f_recv, f_cross)
+         nmt_surprisal=surprisal_soft, mono_surprisal, H_e, f_e, f_self,
+         f_eos, f_recv, f_cross)
 
 df <- fix %>% filter(stage == "translate") %>%
   left_join(pred, by=c("sentence_id","word_index")) %>%
   mutate(log_tfd=log(total_fixation_duration_ms), ambiguity=factor(ambiguity)) %>%
   filter(!is.na(nmt_surprisal), !is.na(mono_surprisal), !is.na(log10_freq),
-         !is.na(H_e), !is.na(f_e), !is.na(f_eos), !is.na(f_recv), !is.na(f_cross)) %>%
+         !is.na(H_e), !is.na(f_e), !is.na(f_self), !is.na(f_eos),
+         !is.na(f_recv), !is.na(f_cross)) %>%
   anti_join(data.frame(sentence_id="S003", word_index=3L), by=c("sentence_id","word_index"))
 
 z <- function(x) (x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)
 df <- df %>% mutate(c_nmt=z(nmt_surprisal), c_mono=z(mono_surprisal),
                     c_wlen=z(word_length), c_wpos=z(word_position), c_freq=z(log10_freq),
-                    c_He=z(H_e), c_fe=z(f_e), c_feos=z(f_eos),
+                    c_He=z(H_e), c_fe=z(f_e), c_fself=z(f_self),
+                    c_feos=z(f_eos),
                     c_frecv=z(f_recv), c_fcross=z(f_cross))
 # Apply leave-pair-out only after primary complete-case cleaning and scaling.
 # Both variants therefore use the same full-sample centres, SDs, and fold
@@ -103,8 +110,14 @@ CTRL <- "c_wlen + c_wpos + c_freq + ambiguity"
 RE   <- "(1|participant) + (1|sentence_id)"
 f <- function(rhs) as.formula(paste("log_tfd ~", CTRL, rhs, "+", RE))
 
-pred_vars   <- c("c_nmt","c_mono","c_He","c_fe","c_feos","c_frecv","c_fcross")
-pred_labels <- c("c_nmt","c_mono","H_e","f_e","f_eos","f_recv","f_cross")
+pred_vars <- c(
+  "c_nmt", "c_mono", "c_He", "c_fe", "c_fself", "c_feos",
+  "c_frecv", "c_fcross"
+)
+pred_labels <- c(
+  "c_nmt", "c_mono", "H_e", "f_e", "f_self", "f_eos", "f_recv",
+  "f_cross"
+)
 
 fit_kfold <- function(name, formula) {
   cache_name <- variant_filename(

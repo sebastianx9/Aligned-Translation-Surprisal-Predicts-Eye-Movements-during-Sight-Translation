@@ -29,7 +29,8 @@ nmt_path <- file.path(DATA_DIR, "nmt_surprisal_soft_word.csv")
 freq_path <- file.path(DATA_DIR, "subtlex_us.csv")
 input_hashes <- analysis_input_hashes(c(
   fixation=fix_path, nmt_surprisal=nmt_path, frequency=freq_path,
-  analysis_design=file.path(repo_root, "R", "analysis_design.R")
+  analysis_design=file.path(repo_root, "R", "analysis_design.R"),
+  analysis_script=file.path(repo_root, "RQ1", "rq1_coef_maximal.R")
 ))
 fix  <- read.csv(fix_path, stringsAsFactors=FALSE)
 nmt  <- read.csv(nmt_path, stringsAsFactors=FALSE)

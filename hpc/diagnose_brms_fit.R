@@ -46,6 +46,33 @@ diagnostics <- diagnostics[
   drop = FALSE
 ]
 
+sampler_parameters <- brms::nuts_params(fit)
+divergences <- sum(
+  sampler_parameters$Value[sampler_parameters$Parameter == "divergent__"]
+)
+treedepth <- sampler_parameters$Value[
+  sampler_parameters$Parameter == "treedepth__"
+]
+energy <- sampler_parameters[
+  sampler_parameters$Parameter == "energy__", , drop = FALSE
+]
+bfmi_by_chain <- tapply(
+  energy$Value, energy$Chain,
+  function(values) mean(diff(values)^2) / stats::var(values)
+)
+configured_treedepth <- tryCatch(
+  fit$fit@stan_args[[1]]$control$max_treedepth,
+  error = function(error) NA_real_
+)
+if (is.null(configured_treedepth) || !length(configured_treedepth)) {
+  configured_treedepth <- NA_real_
+}
+treedepth_hits <- if (is.finite(configured_treedepth)) {
+  sum(treedepth >= configured_treedepth)
+} else {
+  NA_integer_
+}
+
 stem <- tools::file_path_sans_ext(basename(fit_path))
 csv_path <- file.path(output_dir, paste0(stem, "_sampling_diagnostics.csv"))
 write.csv(diagnostics, csv_path, row.names = FALSE)
@@ -67,6 +94,34 @@ cat(sprintf(
   min(finite_bulk), sum(finite_bulk < 400),
   min(finite_tail), sum(finite_tail < 400)
 ))
+cat(sprintf(
+  paste0(
+    "Divergences: %d\nObserved maximum treedepth: %.0f | ",
+    "configured maximum: %s | hits: %s\nMinimum BFMI: %.4f\n"
+  ),
+  divergences,
+  max(treedepth),
+  ifelse(is.finite(configured_treedepth),
+         as.character(configured_treedepth), "unavailable"),
+  ifelse(is.na(treedepth_hits), "unavailable", as.character(treedepth_hits)),
+  min(bfmi_by_chain, na.rm = TRUE)
+))
+
+summary_path <- file.path(
+  output_dir, paste0(stem, "_sampler_summary.csv")
+)
+write.csv(
+  data.frame(
+    fit=basename(fit_path), posterior_draws=n_draws,
+    max_rhat=max(finite_rhat), min_bulk_ess=min(finite_bulk),
+    min_tail_ess=min(finite_tail), divergences=divergences,
+    observed_max_treedepth=max(treedepth),
+    configured_max_treedepth=configured_treedepth,
+    treedepth_hits=treedepth_hits,
+    min_bfmi=min(bfmi_by_chain, na.rm=TRUE)
+  ),
+  summary_path, row.names=FALSE
+)
 
 print_rows <- function(title, data, order_by, decreasing = FALSE, n = 15L) {
   cat("\n", title, "\n", sep = "")
@@ -90,3 +145,6 @@ print_rows(
 )
 
 cat("\nFull diagnostics written to: ", csv_path, "\n", sep = "")
+cat("Sampler summary written to: ", summary_path, "\n", sep = "")
+cat("\nRandom-effects summary:\n")
+print(brms::VarCorr(fit), digits=4)

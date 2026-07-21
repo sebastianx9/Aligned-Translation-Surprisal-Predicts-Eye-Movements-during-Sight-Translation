@@ -1,6 +1,7 @@
 #!/bin/bash --login
 #SBATCH -p multicore
-#SBATCH -n 4
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
 #SBATCH --time=3-00:00:00
 #SBATCH --job-name=dissertation-model
@@ -27,6 +28,30 @@ esac
 repo_dir="${DISSERTATION_REPO_DIR:-${SLURM_SUBMIT_DIR}}"
 output_dir="${DISSERTATION_OUTPUT_DIR:-${DISSERTATION_DATA_DIR}/results}"
 mkdir -p "${output_dir}" "${DISSERTATION_DATA_DIR}/brm_cache"
+
+actual_git_commit="$(git -C "${repo_dir}" rev-parse HEAD)"
+echo "Git commit: ${actual_git_commit}"
+if [[ -n "$(git -C "${repo_dir}" status --porcelain --untracked-files=no)" ]]; then
+  echo "Repository working tree is not clean; refusing a non-reproducible run." >&2
+  git -C "${repo_dir}" status --short >&2
+  exit 2
+fi
+if [[ -n "${EXPECTED_GIT_COMMIT:-}" && \
+      "${actual_git_commit}" != "${EXPECTED_GIT_COMMIT}" ]]; then
+  echo "Repository changed after submission: expected ${EXPECTED_GIT_COMMIT}, got ${actual_git_commit}" >&2
+  exit 2
+fi
+(
+  cd "${DISSERTATION_DATA_DIR}"
+  actual_manifest_sha256="$(sha256sum MANIFEST.sha256 | awk '{print $1}')"
+  echo "Input manifest SHA-256: ${actual_manifest_sha256}"
+  if [[ -n "${EXPECTED_MANIFEST_SHA256:-}" && \
+        "${actual_manifest_sha256}" != "${EXPECTED_MANIFEST_SHA256}" ]]; then
+    echo "Input manifest changed after submission: expected ${EXPECTED_MANIFEST_SHA256}, got ${actual_manifest_sha256}" >&2
+    exit 2
+  fi
+  sha256sum -c MANIFEST.sha256
+)
 
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
