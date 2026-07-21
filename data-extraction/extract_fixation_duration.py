@@ -2,8 +2,8 @@
 Extract word-level total fixation duration for READ and TRANSLATE stages
 from EMMT preprocessed gaze CSV files.
 
-Word x-positions computed from actual font metrics (Arial Bold as
-metric-compatible substitute for Free Sans Bold, fontsize 28).
+Word x-positions are computed from the experiment's Free Sans Bold font at
+28 px.
 
 Output: one row per participant x sentence x stage x word
 """
@@ -11,27 +11,23 @@ Output: one row per participant x sentence x stage x word
 import argparse
 import os
 import csv
+from pathlib import Path
 from PIL import ImageFont
-from timestamp_utils import ts_to_seconds
+from gaze_line import (
+    extract_trial_bouts,
+    map_trial_bouts,
+    x_to_word_index as map_x_to_word_index,
+)
 
 # Display parameters from experiment script
 TEXT_CENTER_X = 620
-TEXT_Y        = 200
-Y_TOLERANCE   = 60   # px: fixation must be within this range of TEXT_Y
-SPACE_WIDTH   = 8.0  # measured from Arial Bold 28px
-MIN_FIX_MS    = 20   # discard fixation bouts shorter than this
-
-# Load font for accurate word width measurement
-_font_candidates = [
-    "/Library/Fonts/Arial Bold.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/Library/Fonts/Arial.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-]
-_font_path = next((p for p in _font_candidates if os.path.exists(p)), None)
-if _font_path is None:
-    raise FileNotFoundError("No suitable font found for word width measurement.")
-FONT = ImageFont.truetype(_font_path, 28)
+FONT_PATH = (
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "FreeSansBold.ttf"
+)
+if not FONT_PATH.exists():
+    raise FileNotFoundError(f"Required experimental font not found: {FONT_PATH}")
+FONT = ImageFont.truetype(str(FONT_PATH), 28)
+SPACE_WIDTH = float(FONT.getlength(" "))
 
 
 def word_pixel_width(word):
@@ -70,104 +66,40 @@ def word_x_ranges(words):
 def x_to_word_index(x, ranges):
     """
     Return index of the word whose x-range contains x.
-    Falls back to nearest word if x is between words.
-    Returns -1 if no words defined.
+    Falls back to the nearest word only when x falls in an inter-word space.
+    Returns -1 outside the sentence's horizontal bounds.
     """
-    if not ranges:
-        return -1
-    # exact match
-    for i, (x0, x1, _) in enumerate(ranges):
-        if x0 <= x <= x1:
-            return i
-    # nearest word center
-    centers = [(x0 + x1) / 2 for x0, x1, _ in ranges]
-    return min(range(len(centers)), key=lambda i: abs(centers[i] - x))
+    return map_x_to_word_index(x, ranges)
 
 
-def extract_word_fixations(filepath, words):
+def extract_word_fixations(
+    filepath,
+    words,
+    stage="read",
+    prior_model=None,
+    return_diagnostic=False,
+):
     """
     Return {word_index: total_fixation_ms} for one gaze CSV file.
-    Groups consecutive fixation samples into bouts, maps each bout
-    to a word by mean x-position (filtered by y proximity to text line).
+    Groups consecutive fixation samples into bouts, estimates the trial's
+    dominant text-line band, and maps retained bouts by mean x-position.
     """
     ranges = word_x_ranges(words)
-    timestamps, xs, ys, events = [], [], [], []
-
-    with open(filepath, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                ts = ts_to_seconds(row["TimeStamp"])
-                ev = row["Event"].strip().lower()
-            except (ValueError, KeyError):
-                continue
-            x_val = row["X"].strip()
-            y_val = row["Y"].strip()
-            try:
-                x = float(x_val) if x_val else None
-            except ValueError:
-                x = None
-            try:
-                y = float(y_val) if y_val else None
-            except ValueError:
-                y = None
-            timestamps.append(ts)
-            xs.append(x)
-            ys.append(y)
-            events.append(ev)
-
-    if len(timestamps) < 2:
-        return {}
-
-    # median inter-sample interval for bout duration calculation
-    diffs = sorted(
-        timestamps[i+1] - timestamps[i]
-        for i in range(len(timestamps) - 1)
-        if timestamps[i+1] > timestamps[i]
+    all_bouts, line_bouts, diagnostic, model = extract_trial_bouts(
+        filepath,
+        ranges,
+        stage=stage,
+        prior_model=prior_model,
     )
-    sample_interval = diffs[len(diffs) // 2] if diffs else 0.0005
-
+    mapped_bouts = map_trial_bouts(
+        all_bouts, line_bouts, ranges, diagnostic=diagnostic
+    )
     word_totals = {}
-    in_fix = False
-    bout_ts, bout_xs, bout_ys = [], [], []
-
-    def close_bout():
-        if not bout_ts:
-            return
-        mean_y = sum(v for v in bout_ys if v is not None)
-        valid_y = [v for v in bout_ys if v is not None]
-        if not valid_y:
-            return
-        mean_y = sum(valid_y) / len(valid_y)
-        if abs(mean_y - TEXT_Y) > Y_TOLERANCE:
-            return  # fixation not on text line
-        valid_x = [v for v in bout_xs if v is not None]
-        if not valid_x:
-            return
-        mean_x = sum(valid_x) / len(valid_x)
-        duration_ms = ((bout_ts[-1] - bout_ts[0]) + sample_interval) * 1000
-        if duration_ms < MIN_FIX_MS:
-            return
-        wi = x_to_word_index(mean_x, ranges)
+    for wi, duration_ms in mapped_bouts:
         if wi >= 0:
             word_totals[wi] = word_totals.get(wi, 0.0) + duration_ms
-
-    for ts, x, y, ev in zip(timestamps, xs, ys, events):
-        if ev == "fixation":
-            if not in_fix:
-                in_fix = True
-                bout_ts, bout_xs, bout_ys = [], [], []
-            bout_ts.append(ts)
-            bout_xs.append(x)
-            bout_ys.append(y)
-        else:
-            if in_fix:
-                close_bout()
-                in_fix = False
-
-    if in_fix:
-        close_bout()
-
+    if return_diagnostic:
+        return word_totals, diagnostic, model
     return word_totals
 
 
@@ -180,7 +112,14 @@ def parse_filename(fname):
     return parts  # [participant, order, sentence_id, ambiguity, congruency]
 
 
-def process_directory(directory, stage_label, sentences, results):
+def process_directory(
+    directory,
+    stage_label,
+    sentences,
+    results,
+    diagnostics,
+    read_line_models,
+):
     for fname in sorted(os.listdir(directory)):
         parts = parse_filename(fname)
         if parts is None:
@@ -190,7 +129,31 @@ def process_directory(directory, stage_label, sentences, results):
         if words is None:
             continue
         fpath = os.path.join(directory, fname)
-        word_totals = extract_word_fixations(fpath, words)
+        trial_key = (participant, order, sentence_id)
+        prior_model = (
+            read_line_models.get(trial_key)
+            if stage_label == "translate"
+            else None
+        )
+        word_totals, diagnostic, model = extract_word_fixations(
+            fpath,
+            words,
+            stage=stage_label,
+            prior_model=prior_model,
+            return_diagnostic=True,
+        )
+        if stage_label == "read" and model is not None:
+            read_line_models[trial_key] = model
+        diagnostics.append({
+            "participant": participant,
+            "order": order,
+            "sentence_id": sentence_id,
+            "ambiguity": ambiguity,
+            "congruency": congruency,
+            "stage": stage_label,
+            "file": fname,
+            **diagnostic.to_dict(),
+        })
         for wi, dur in sorted(word_totals.items()):
             results.append({
                 "participant":               participant,
@@ -201,6 +164,7 @@ def process_directory(directory, stage_label, sentences, results):
                 "stage":                    stage_label,
                 "word_index":               wi,
                 "word":                     words[wi],
+                "line_fit_source":          model.fit_source,
                 "total_fixation_duration_ms": round(dur, 2),
             })
 
@@ -243,6 +207,10 @@ def main():
                         help="Path to Sentences.csv from the EMMT corpus")
     parser.add_argument("--output",        required=True,
                         help="Output CSV path")
+    parser.add_argument(
+        "--diagnostics_output",
+        help="Optional trial-level line-estimation diagnostics CSV path",
+    )
     args = parser.parse_args()
 
     for d in (args.read_dir, args.translate_dir):
@@ -254,27 +222,71 @@ def main():
     sentences = load_sentences(args.sentences)
     print(f"  {len(sentences)} sentences loaded.")
 
-    results = []
+    results, diagnostics, read_line_models = [], [], {}
     print("Processing Read stage...")
-    process_directory(args.read_dir,      "read",      sentences, results)
+    process_directory(
+        args.read_dir,
+        "read",
+        sentences,
+        results,
+        diagnostics,
+        read_line_models,
+    )
     print("Processing Translate stage...")
-    process_directory(args.translate_dir, "translate", sentences, results)
+    process_directory(
+        args.translate_dir,
+        "translate",
+        sentences,
+        results,
+        diagnostics,
+        read_line_models,
+    )
 
     print("Removing outliers (>2.5 SD from participant mean per stage)...")
     results = remove_outliers(results)
 
     fields = ["participant", "order", "sentence_id", "ambiguity", "congruency",
-              "stage", "word_index", "word", "total_fixation_duration_ms"]
+              "stage", "word_index", "word", "line_fit_source",
+              "total_fixation_duration_ms"]
 
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(results)
 
+    diagnostics_output = args.diagnostics_output or (
+        os.path.splitext(args.output)[0] + "_line_diagnostics.csv"
+    )
+    Path(diagnostics_output).parent.mkdir(parents=True, exist_ok=True)
+    diagnostic_fields = [
+        "participant", "order", "sentence_id", "ambiguity", "congruency",
+        "stage", "file", "status", "reason", "fit_source", "line_y",
+        "alpha", "beta", "half_width_px", "residual_mad_px",
+        "n_raw_bouts", "n_candidate_bouts", "n_line_bouts", "n_x_bins",
+        "n_word_aois", "candidate_duration_ms", "line_duration_ms",
+        "line_bout_share", "line_duration_share", "line_x_span_px",
+        "robust_x_span_norm", "mode_score_ratio",
+        "independent_failure_reason", "read_alpha", "read_beta",
+        "translation_read_shift_px", "n_mapped_word_bouts",
+        "n_offtext_bouts", "n_unknown_bouts", "mapped_word_duration_ms",
+        "offtext_duration_ms", "unknown_duration_ms", "quality_flags",
+        "review_flags",
+    ]
+    with open(diagnostics_output, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=diagnostic_fields)
+        writer.writeheader()
+        writer.writerows(diagnostics)
+
     read_n  = sum(1 for r in results if r["stage"] == "read")
     trans_n = sum(1 for r in results if r["stage"] == "translate")
     print(f"\nDone.  READ: {read_n} rows,  TRANSLATE: {trans_n} rows")
     print(f"Output: {args.output}")
+    accepted = sum(d["status"] == "ok" for d in diagnostics)
+    print(
+        f"Line estimates: {accepted}/{len(diagnostics)} trials accepted; "
+        f"diagnostics: {diagnostics_output}"
+    )
 
 
 if __name__ == "__main__":

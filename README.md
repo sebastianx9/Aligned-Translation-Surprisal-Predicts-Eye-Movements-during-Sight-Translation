@@ -21,8 +21,8 @@ GPT-2 subword surprisal for each English source word.
 - **RQ3 (exploratory):** Which part of source-text processing carries the
   association? Conditional re-reading time is the theory-driven primary
   outcome; first-fixation duration, gaze duration, and go-past time are
-  secondary first-pass contrasts. The probability of regression-in is not
-  modelled.
+  secondary first-encounter contrasts. The probability of a subsequent
+  revisit is not modelled.
 
 Because reading always precedes translation, RQ2 identifies a
 translation-related stage difference within this fixed-order paradigm. It
@@ -33,13 +33,13 @@ and order.
 
 > **Reanalysis in progress.** The numerical values in this section were
 > obtained before the July 2026 corrections to EMMT timestamp parsing and
-> punctuation-sensitive SUBTLEX matching, and are retained only as a record of
-> the previous analysis. The corrected Bayesian models, including the new
-> go-past outcome, are being regenerated on the CSF; these values must not be
-> treated as final.
+> punctuation-sensitive SUBTLEX matching, and before trial-level correction of
+> vertical gaze drift. They are retained only as a record of the previous
+> analysis. The corrected Bayesian models, including the new go-past outcome,
+> are being regenerated on the CSF; these values must not be treated as final.
 
 In RQ3, conditional RRT retains its theory-driven primary status. The result
-file also reports Holm-adjusted values across the three secondary first-pass
+file also reports Holm-adjusted values across the three secondary first-encounter
 contrasts (FFD, GD, and go-past); the figure labels nominal values and is
 interpreted descriptively.
 
@@ -72,7 +72,7 @@ For RQ3, gains were -1.22 for first-fixation duration, +0.59 for gaze duration,
 and +8.46 for conditional re-reading time (clustered SE = 4.54, nominal
 one-sided p = .032). This is tentative evidence about re-reading duration
 among revisited words, not evidence that higher $c_\mathrm{nmt}$ makes a word
-more likely to be revisited. Non-significant first-pass comparisons are not
+more likely to be revisited. Non-significant first-encounter comparisons are not
 equivalence tests. Go-past time was added to the corrected analysis and has no
 pre-correction result in this table.
 
@@ -81,18 +81,30 @@ pre-correction result in this table.
 The EMMT recordings are available from the
 [UFAL EMMT repository](https://github.com/ufal/eyetracked-multi-modal-translation)
 and are not redistributed here. SUBTLEX-US supplies the frequency norms.
-The corpus contains 43 participants, but the released gaze files for P38
-contain column headers only and no gaze samples. The eye-movement analyses
-therefore use gaze observations from the remaining 42 participants.
+The corpus contains 43 participants. The released gaze files for P38 contain
+column headers only and no gaze samples. P10 and P14 contain some raw gaze
+data, but none of their trial-stages provides sufficient fixation coverage
+across the rendered sentence for a defensible word mapping. The final derived
+eye-movement files therefore contain observations from 40 participants. This
+exclusion is determined by the trial-level geometric quality checks, not by
+the timestamp correction.
 Expected analysis inputs are:
 
 - `fixation_durations_word.csv`
 - `eye_measures_word.csv`
+- `fixation_durations_word_line_diagnostics.csv`
+- `eye_measures_word_line_diagnostics.csv`
 - `nmt_surprisal_soft_word.csv`
 - `nmt_alignment_mass_word.csv`
 - `monolingual_surprisal_word.csv`
 - `attention_features_6_norm.csv`
 - `subtlex_us.csv`
+
+With the July 2026 line correction, the two eye-movement extractors produce
+the same 19,857 word keys and identical TFD values: 10,751 READ rows and 9,106
+TRANSLATE rows. The line diagnostics cover all 2,746 available stage files;
+2,459 pass the geometric quality checks (1,233 READ and 1,226 TRANSLATE), of
+which 190 TRANSLATE fits use the READ prior.
 
 The main R scripts accept `--data-dir=PATH` and `--output-dir=PATH`. Model
 caches and derived CSVs are deliberately not tracked.
@@ -143,12 +155,56 @@ The EMMT gaze extractors split timestamps on colons rather than fixed character
 positions. This is required because hour, minute, and second fields are not
 consistently zero-padded (for example, `9:18:51.2205` and `12:9:28.1865`).
 Fixation bouts shorter than 20 ms are removed before word-level aggregation in
-both eye-movement extractors. The eye-measure extractor also derives go-past
-time from the ordered bouts: it accumulates fixation time from a word's first
-landing until, but not including, the first later fixation to its right,
+both eye-movement extractors.
+
+The recorded vertical gaze coordinate is not treated as a fixed screen
+location. Each READ trial is fitted with a robust, potentially tilted sentence
+line from fixation bouts near the rendered sentence. A TRANSLATE trial uses an
+independent fit when it contains a well-supported scanpath; a weak fit may use
+the immediately preceding READ slope as a geometric prior. The prior-supported
+fit keeps that slope fixed throughout refitting, must remain within 80 px of
+the READ line, and is subjected to the same competing-band diagnostic. It is
+otherwise rejected. Acceptance requires evidence distributed across the
+sentence rather than a dense cluster at one screen location. An independent
+fit must cover at least four word regions, except in the shortest four-word
+sentences, where three regions are required; the other support, bin-coverage,
+span, dispersion, and competing-band criteria are unchanged. No rejected
+trial falls back to a fixed y coordinate.
+
+Every run writes a companion `*_line_diagnostics.csv` containing the fitted
+intercept, slope, band width, residual dispersion, horizontal coverage,
+equal-bout and duration support, competing-mode score, the independent fit's
+failure reason when a READ prior was needed, READ--TRANSLATE displacement,
+WORD/OFFTEXT/UNKNOWN counts and durations, rejection reasons, and non-fatal
+review flags. Each word row also records `line_fit_source`, allowing an
+independent-fit-only sensitivity analysis. Review flags identify minimally
+supported prior fits and the rare case in which an adaptive prior band cycles
+at one boundary bout; the latter is resolved deterministically using the
+intersection of the cycling memberships and their narrowest band.
+
+Word regions are reconstructed with the experiment's Free Sans Bold font at
+28 px. The repository vendors the GNU FreeFont 2012 release under
+`assets/fonts/` (SHA-256 for `FreeSansBold.ttf`:
+`982534a3731416a15e2756601721f26053f68bf4239011550f3dd23ce6308215`).
+Fixations more than 30 px beyond the bounded sentence region are not forced
+onto the first or last word. Inter-word spaces are divided at the midpoint of
+the rendered gap rather than by distance to word centres.
+
+The eye-measure extractor keeps every retained-duration bout in sequence as a
+mapped word, `OFFTEXT`, or `UNKNOWN`. This prevents an intervening unmapped
+fixation from joining two visits to the same word into one first-encounter
+sequence. It also derives go-past time from the ordered bouts: it accumulates
+fixation time from a word's first landing until, but not including, the first
+later fixation to its right,
 including intervening regressions to earlier words. It leaves the value missing
-when no rightward crossing is observed or when the word was first encountered
-through a regression from later text.
+when no rightward crossing is observed, when the word was first encountered
+through a regression from later text, or when an unmapped bout makes the path
+unrecoverable; `go_past_status` records which case applies.
+`first_encounter_status` separately records whether the word was first reached
+progressively or only after a word to its right had already been visited.
+`reread_occurrence` indicates a later return after the first visit. The legacy
+`regress_in` column is retained as an alias for compatibility, but it should
+not be interpreted as proving that the return came from the word's right.
 
 SUBTLEX lookup keys and the word-length control use a common lexical form:
 surrounding Unicode punctuation is removed and case is normalised, while
@@ -271,6 +327,14 @@ even when the observation count and fold vector remain the same.
 - Bhattacharya, S., Kloudova, V., Zouhar, V., & Bojar, O. (2022). EMMT: A
   simultaneous eye-tracking, 4-electrode EEG and audio corpus for multi-modal
   reading and translation scenarios. *arXiv:2204.02905*.
+- Carl, M. (2013). Dynamic programming for re-mapping noisy fixations in
+  translation tasks. *Journal of Eye Movement Research, 6*(2), Article 5.
+- Carr, J. W., Pescuma, V. N., Furlan, M., Ktori, M., & Crepaldi, D. (2022).
+  Algorithms for the automated correction of vertical drift in eye-tracking
+  data. *Behavior Research Methods, 54*, 287--310.
+- Cohen, A. L. (2013). Software for the automatic correction of recorded eye
+  fixation locations in reading experiments. *Behavior Research Methods, 45*,
+  679--683.
 - Lim, Z. W., Vylomova, E., Kemp, C., & Cohn, T. (2024). Predicting human
   translation difficulty with neural machine translation. *TACL*, 12,
   1479--1496.

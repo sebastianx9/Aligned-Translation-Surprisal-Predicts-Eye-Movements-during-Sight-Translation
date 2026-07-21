@@ -37,9 +37,11 @@ class GoPastTimeTests(unittest.TestCase):
 
         # Word 1 is first encountered only after word 2 has already been seen.
         self.assertIsNone(measures[1]["go_past_ms"])
+        self.assertEqual(measures[1]["first_encounter_status"], "regression")
         # Word 2, by contrast, was encountered in forward first pass; its
         # regression to word 1 is included until the later crossing to word 3.
         self.assertEqual(measures[2]["go_past_ms"], 300.0)
+        self.assertEqual(measures[2]["first_encounter_status"], "progressive")
 
     def test_no_subsequent_rightward_crossing_is_structurally_missing(self):
         bouts = [(0, 80.0), (1, 100.0), (0, 90.0)]
@@ -52,6 +54,31 @@ class GoPastTimeTests(unittest.TestCase):
         measures = compute_measures([(0, 80.0), (1, 90.0), (2, 100.0)], 3)
 
         self.assertIsNone(measures[2]["go_past_ms"])
+
+    def test_off_text_bout_terminates_first_pass(self):
+        bouts = [(0, 100.0), (-1, 60.0), (0, 80.0), (1, 90.0)]
+        measures = compute_measures(bouts, 2)
+
+        self.assertEqual(measures[0]["gd_ms"], 100.0)
+        self.assertEqual(measures[0]["rrt_ms"], 80.0)
+        self.assertEqual(measures[0]["reread_occurrence"], 1)
+        self.assertEqual(measures[0]["regress_in"], 1)
+        self.assertIsNone(measures[0]["go_past_ms"])
+        self.assertEqual(
+            measures[0]["go_past_status"], "intervening_unmapped_bout"
+        )
+
+    def test_unknown_bout_terminates_first_pass(self):
+        bouts = [(0, 100.0), (-2, 60.0), (0, 80.0), (1, 90.0)]
+        measures = compute_measures(bouts, 2)
+
+        self.assertEqual(measures[0]["gd_ms"], 100.0)
+        self.assertEqual(measures[0]["rrt_ms"], 80.0)
+        self.assertEqual(measures[0]["reread_occurrence"], 1)
+        self.assertIsNone(measures[0]["go_past_ms"])
+        self.assertEqual(
+            measures[0]["go_past_status"], "intervening_unmapped_bout"
+        )
 
 
 if __name__ == "__main__":

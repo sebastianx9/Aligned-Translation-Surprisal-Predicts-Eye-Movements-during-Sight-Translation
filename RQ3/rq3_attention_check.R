@@ -46,6 +46,6 @@ run <- function(df,label){
     di<-t-b; ds<-tapply(di,sid,sum); res[i,3:5]<-c(mean(di),sd(ds)*sqrt(S)/nrow(df),signflip(ds)) }
   res$p_holm<-p.adjust(res$p,method="holm"); res }
 gd  <- run(base %>% filter(gd_ms>0)  %>% mutate(y=log(gd_ms)),  "GD")
-rrt <- run(base %>% filter(regress_in==1, rrt_ms>0) %>% mutate(y=log(rrt_ms)), "RRT")
+rrt <- run(base %>% filter(reread_occurrence==1, rrt_ms>0) %>% mutate(y=log(rrt_ms)), "RRT")
 cat("\n=== Attention features -> GD / RRT (lmer 10-fold held-out Delta-llh) ===\n")
 print(format(rbind(gd,rrt),digits=3)); cat("DONE\n")

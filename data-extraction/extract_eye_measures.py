@@ -9,12 +9,16 @@ Extract word-level eye movement measures for READ and TRANSLATE stages:
              fixations on the word and on prior words are included
   - RRT  : re-reading time (ms)          — all fixations on word after first pass
   - n_fix: total number of fixation bouts on word
-  - regress_in: 1 if word re-fixated after first pass, else 0
+  - reread_occurrence: 1 if word is re-fixated after its first visit, else 0
+  - regress_in: backward-compatible alias for reread_occurrence; it does not
+                imply that the return necessarily came from the word's right
+  - first_encounter_status: whether the first visit was progressive or only
+                occurred after a word to the right had already been visited
 
 Two-stage theoretical motivation:
   FFD / GD / go-past capture first-pass processing (go-past also includes
   regressions to prior text before the first rightward crossing)
-  RRT / regress_in capture re-consultation during translation production
+  RRT / reread_occurrence capture re-consultation during translation production
   (attention features may have signal here)
 
 Same word x-position mapping as extract_fixation_duration.py.
@@ -24,25 +28,22 @@ Output: one row per participant x sentence x stage x word (fixated words only).
 import argparse
 import os
 import csv
+from pathlib import Path
 from PIL import ImageFont
-from timestamp_utils import ts_to_seconds
+from gaze_line import (
+    extract_trial_bouts,
+    map_trial_bouts,
+    x_to_word_index as map_x_to_word_index,
+)
 
 TEXT_CENTER_X = 620
-TEXT_Y        = 200
-Y_TOLERANCE   = 60
-SPACE_WIDTH   = 8.0
-MIN_FIX_MS    = 20    # discard bouts shorter than this
-
-_font_candidates = [
-    "/Library/Fonts/Arial Bold.ttf",
-    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
-    "/Library/Fonts/Arial.ttf",
-    "/System/Library/Fonts/Helvetica.ttc",
-]
-_font_path = next((p for p in _font_candidates if os.path.exists(p)), None)
-if _font_path is None:
-    raise FileNotFoundError("No suitable font found.")
-FONT = ImageFont.truetype(_font_path, 28)
+FONT_PATH = (
+    Path(__file__).resolve().parents[1] / "assets" / "fonts" / "FreeSansBold.ttf"
+)
+if not FONT_PATH.exists():
+    raise FileNotFoundError(f"Required experimental font not found: {FONT_PATH}")
+FONT = ImageFont.truetype(str(FONT_PATH), 28)
+SPACE_WIDTH = float(FONT.getlength(" "))
 
 
 def word_pixel_width(word):
@@ -74,93 +75,40 @@ def word_x_ranges(words):
 
 
 def x_to_word_index(x, ranges):
-    if not ranges:
-        return -1
-    for i, (x0, x1, _) in enumerate(ranges):
-        if x0 <= x <= x1:
-            return i
-    centers = [(x0 + x1) / 2 for x0, x1, _ in ranges]
-    return min(range(len(centers)), key=lambda i: abs(centers[i] - x))
+    return map_x_to_word_index(x, ranges)
 
 
-def extract_bouts(filepath, words):
+def extract_bouts(
+    filepath,
+    words,
+    stage="read",
+    prior_model=None,
+    return_diagnostic=False,
+    return_model=False,
+):
     """
-    Return ordered list of (word_index, duration_ms) for all valid fixation
-    bouts on the text line, in temporal order.
+    Return an ordered list of (word_index, duration_ms) after estimating the
+    trial's dominant text-line fixation band. Bouts outside the sentence ROI
+    are retained as word index -1 so that they terminate first-pass sequences.
     """
     ranges = word_x_ranges(words)
-    timestamps, xs, ys, events = [], [], [], []
-
-    with open(filepath, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            try:
-                ts  = ts_to_seconds(row["TimeStamp"])
-                ev  = row["Event"].strip().lower()
-            except (ValueError, KeyError):
-                continue
-            try:
-                x = float(row["X"].strip()) if row["X"].strip() else None
-            except ValueError:
-                x = None
-            try:
-                y = float(row["Y"].strip()) if row["Y"].strip() else None
-            except ValueError:
-                y = None
-            timestamps.append(ts)
-            xs.append(x)
-            ys.append(y)
-            events.append(ev)
-
-    if len(timestamps) < 2:
-        return []
-
-    diffs = sorted(
-        timestamps[i+1] - timestamps[i]
-        for i in range(len(timestamps) - 1)
-        if timestamps[i+1] > timestamps[i]
+    all_bouts, line_bouts, diagnostic, model = extract_trial_bouts(
+        filepath, ranges, stage=stage, prior_model=prior_model
     )
-    sample_interval = diffs[len(diffs) // 2] if diffs else 0.0005
+    mapped_bouts = map_trial_bouts(
+        all_bouts, line_bouts, ranges, diagnostic=diagnostic
+    )
+    if not line_bouts:
+        result = []
+        if return_diagnostic and return_model:
+            return result, diagnostic, model
+        return (result, diagnostic) if return_diagnostic else result
 
-    bouts = []
-    in_fix = False
-    bout_ts, bout_xs, bout_ys = [], [], []
-
-    def close_bout():
-        if not bout_ts:
-            return
-        valid_y = [v for v in bout_ys if v is not None]
-        if not valid_y:
-            return
-        if abs(sum(valid_y) / len(valid_y) - TEXT_Y) > Y_TOLERANCE:
-            return
-        valid_x = [v for v in bout_xs if v is not None]
-        if not valid_x:
-            return
-        mean_x    = sum(valid_x) / len(valid_x)
-        dur_ms    = ((bout_ts[-1] - bout_ts[0]) + sample_interval) * 1000
-        if dur_ms < MIN_FIX_MS:
-            return
-        wi = x_to_word_index(mean_x, ranges)
-        if wi >= 0:
-            bouts.append((wi, dur_ms))
-
-    for ts, x, y, ev in zip(timestamps, xs, ys, events):
-        if ev == "fixation":
-            if not in_fix:
-                in_fix = True
-                bout_ts, bout_xs, bout_ys = [], [], []
-            bout_ts.append(ts)
-            bout_xs.append(x)
-            bout_ys.append(y)
-        else:
-            if in_fix:
-                close_bout()
-                in_fix = False
-    if in_fix:
-        close_bout()
-
-    return bouts
+    if return_diagnostic and return_model:
+        return mapped_bouts, diagnostic, model
+    if return_diagnostic:
+        return mapped_bouts, diagnostic
+    return mapped_bouts
 
 
 def compute_measures(bouts, n_words):
@@ -172,6 +120,8 @@ def compute_measures(bouts, n_words):
     ffd   = [None] * n_words
     gd    = [0.0]  * n_words
     go_past = [None] * n_words
+    go_past_status = ["unfixated"] * n_words
+    first_encounter_status = ["unfixated"] * n_words
     rrt   = [0.0]  * n_words
     n_fix = [0]    * n_words
     first_fix_bout = [None] * n_words  # index of first bout on word
@@ -209,7 +159,11 @@ def compute_measures(bouts, n_words):
             0 <= prior_wi < n_words and prior_wi > w
             for prior_wi, _ in bouts[:idx]
         )
-        if not previously_visited_right:
+        if previously_visited_right:
+            first_encounter_status[w] = "regression"
+            go_past_status[w] = "first_encounter_by_regression"
+        else:
+            first_encounter_status[w] = "progressive"
             crossing_idx = next(
                 (
                     j
@@ -218,12 +172,19 @@ def compute_measures(bouts, n_words):
                 ),
                 None,
             )
-            if crossing_idx is not None:
+            if crossing_idx is None:
+                go_past_status[w] = "no_rightward_crossing"
+            elif any(wi < 0 for wi, _ in bouts[idx + 1:crossing_idx]):
+                # Once gaze leaves the mapped sentence region, the regression
+                # path cannot be reconstructed without silently deleting time.
+                go_past_status[w] = "intervening_unmapped_bout"
+            else:
                 go_past[w] = sum(
                     dur
                     for wi, dur in bouts[idx:crossing_idx]
                     if 0 <= wi < n_words
                 )
+                go_past_status[w] = "observed"
 
         # RRT: any later fixations on w
         for j in range(i, len(bouts)):
@@ -238,8 +199,13 @@ def compute_measures(bouts, n_words):
             "go_past_ms":  (
                 round(go_past[w], 2) if go_past[w] is not None else None
             ),
+            "go_past_status": go_past_status[w],
+            "first_encounter_status": first_encounter_status[w],
             "rrt_ms":      round(rrt[w], 2),
             "n_fix":       n_fix[w],
+            "reread_occurrence": int(rrt[w] > 0),
+            # Backward-compatible alias. This is a return to the word after
+            # its first visit, not necessarily a regression from its right.
             "regress_in":  int(rrt[w] > 0),
         }
         for w in range(n_words)
@@ -256,7 +222,14 @@ def parse_filename(fname):
     return parts
 
 
-def process_directory(directory, stage_label, sentences, results):
+def process_directory(
+    directory,
+    stage_label,
+    sentences,
+    results,
+    diagnostics,
+    read_line_models,
+):
     for fname in sorted(os.listdir(directory)):
         parts = parse_filename(fname)
         if parts is None:
@@ -266,7 +239,32 @@ def process_directory(directory, stage_label, sentences, results):
         if words is None:
             continue
         fpath  = os.path.join(directory, fname)
-        bouts  = extract_bouts(fpath, words)
+        trial_key = (participant, order, sentence_id)
+        prior_model = (
+            read_line_models.get(trial_key)
+            if stage_label == "translate"
+            else None
+        )
+        bouts, diagnostic, model = extract_bouts(
+            fpath,
+            words,
+            stage=stage_label,
+            prior_model=prior_model,
+            return_diagnostic=True,
+            return_model=True,
+        )
+        if stage_label == "read" and model is not None:
+            read_line_models[trial_key] = model
+        diagnostics.append({
+            "participant": participant,
+            "order": order,
+            "sentence_id": sentence_id,
+            "ambiguity": ambiguity,
+            "congruency": congruency,
+            "stage": stage_label,
+            "file": fname,
+            **diagnostic.to_dict(),
+        })
         if not bouts:
             continue
         measures = compute_measures(bouts, len(words))
@@ -280,6 +278,7 @@ def process_directory(directory, stage_label, sentences, results):
                 "stage":        stage_label,
                 "word_index":   wi,
                 "word":         words[wi],
+                "line_fit_source": model.fit_source,
                 **m,
             })
 
@@ -316,18 +315,36 @@ def main():
     parser.add_argument("--sentences", required=True,
                         help="Path to Sentences.csv from the EMMT corpus")
     parser.add_argument("--output", required=True, help="Output CSV path")
+    parser.add_argument(
+        "--diagnostics_output",
+        help="Optional trial-level line-estimation diagnostics CSV path",
+    )
     args = parser.parse_args()
 
     print("Loading sentences...")
     sentences = load_sentences(args.sentences)
     print(f"  {len(sentences)} sentences.")
 
-    results = []
+    results, diagnostics, read_line_models = [], [], {}
     print("Processing Read...")
-    process_directory(args.read_dir,      "read",      sentences, results)
+    process_directory(
+        args.read_dir,
+        "read",
+        sentences,
+        results,
+        diagnostics,
+        read_line_models,
+    )
     print(f"  {sum(1 for r in results if r['stage']=='read')} rows")
     print("Processing Translate...")
-    process_directory(args.translate_dir, "translate", sentences, results)
+    process_directory(
+        args.translate_dir,
+        "translate",
+        sentences,
+        results,
+        diagnostics,
+        read_line_models,
+    )
     print(f"  {sum(1 for r in results if r['stage']=='translate')} rows")
 
     print("Removing outliers (2.5 SD on TFD)...")
@@ -335,18 +352,49 @@ def main():
 
     fields = ["participant", "order", "sentence_id", "ambiguity", "congruency",
               "stage", "word_index", "word",
-              "tfd_ms", "ffd_ms", "gd_ms", "go_past_ms", "rrt_ms",
+              "line_fit_source", "tfd_ms", "ffd_ms", "gd_ms", "go_past_ms",
+              "go_past_status", "first_encounter_status", "rrt_ms",
+              "reread_occurrence",
               "n_fix", "regress_in"]
 
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(results)
 
+    diagnostics_output = args.diagnostics_output or (
+        os.path.splitext(args.output)[0] + "_line_diagnostics.csv"
+    )
+    Path(diagnostics_output).parent.mkdir(parents=True, exist_ok=True)
+    diagnostic_fields = [
+        "participant", "order", "sentence_id", "ambiguity", "congruency",
+        "stage", "file", "status", "reason", "fit_source", "line_y",
+        "alpha", "beta", "half_width_px", "residual_mad_px",
+        "n_raw_bouts", "n_candidate_bouts", "n_line_bouts", "n_x_bins",
+        "n_word_aois", "candidate_duration_ms", "line_duration_ms",
+        "line_bout_share", "line_duration_share", "line_x_span_px",
+        "robust_x_span_norm", "mode_score_ratio",
+        "independent_failure_reason", "read_alpha", "read_beta",
+        "translation_read_shift_px", "n_mapped_word_bouts",
+        "n_offtext_bouts", "n_unknown_bouts", "mapped_word_duration_ms",
+        "offtext_duration_ms", "unknown_duration_ms", "quality_flags",
+        "review_flags",
+    ]
+    with open(diagnostics_output, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=diagnostic_fields)
+        writer.writeheader()
+        writer.writerows(diagnostics)
+
     read_n  = sum(1 for r in results if r["stage"] == "read")
     trans_n = sum(1 for r in results if r["stage"] == "translate")
     print(f"\nDone.  Read: {read_n}  Translate: {trans_n}")
     print(f"Output: {args.output}")
+    accepted = sum(d["status"] == "ok" for d in diagnostics)
+    print(
+        f"Line estimates: {accepted}/{len(diagnostics)} trials accepted; "
+        f"diagnostics: {diagnostics_output}"
+    )
 
 
 if __name__ == "__main__":

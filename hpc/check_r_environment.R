@@ -38,6 +38,8 @@ source(file.path(repo_dir, "R", "analysis_design.R"))
 
 required_files <- c(
   "fixation_durations_word.csv", "eye_measures_word.csv",
+  "fixation_durations_word_line_diagnostics.csv",
+  "eye_measures_word_line_diagnostics.csv",
   "nmt_surprisal_soft_word.csv", "nmt_alignment_mass_word.csv",
   "monolingual_surprisal_word.csv", "attention_features_6_norm.csv",
   "subtlex_us.csv"
@@ -57,17 +59,42 @@ eye <- read.csv(
   file.path(data_dir, "eye_measures_word.csv"),
   stringsAsFactors = FALSE
 )
+fix_diag <- read.csv(
+  file.path(data_dir, "fixation_durations_word_line_diagnostics.csv"),
+  stringsAsFactors = FALSE
+)
+eye_diag <- read.csv(
+  file.path(data_dir, "eye_measures_word_line_diagnostics.csv"),
+  stringsAsFactors = FALSE
+)
+word_key <- c(
+  "participant", "order", "sentence_id", "ambiguity", "congruency",
+  "stage", "word_index", "word"
+)
 stopifnot(
   nrow(fix) == nrow(eye),
-  nrow(fix) == 14185L,
-  "go_past_ms" %in% names(eye),
-  sum(eye$stage == "read" & !is.na(eye$go_past_ms)) == 4227L,
-  sum(eye$stage == "translate" & !is.na(eye$go_past_ms)) == 3626L,
-  length(unique(fix$participant)) == 42L,
+  nrow(fix) == 19857L,
+  all(c(
+    "go_past_ms", "go_past_status", "first_encounter_status",
+    "reread_occurrence", "line_fit_source"
+  ) %in% names(eye)),
+  "line_fit_source" %in% names(fix),
+  identical(fix[word_key], eye[word_key]),
+  identical(fix$line_fit_source, eye$line_fit_source),
+  isTRUE(all.equal(
+    fix$total_fixation_duration_ms, eye$tfd_ms, tolerance = 0
+  )),
+  sum(eye$stage == "read" & !is.na(eye$go_past_ms)) == 6081L,
+  sum(eye$stage == "translate" & !is.na(eye$go_past_ms)) == 4882L,
+  length(unique(fix$participant)) == 40L,
+  setequal(
+    setdiff(sprintf("P%02d", 1:43), unique(fix$participant)),
+    c("P10", "P14", "P38")
+  ),
   n_distinct(fix$sentence_id) == 200L,
   n_distinct(eye$sentence_id) == 200L,
-  sum(fix$stage == "read") == 7664L,
-  sum(fix$stage == "translate") == 6521L,
+  sum(fix$stage == "read") == 10751L,
+  sum(fix$stage == "translate") == 9106L,
   setequal(
     intersect(unique(fix$sentence_id), c("S031", "S032")),
     c("S031", "S032")
@@ -77,9 +104,42 @@ stopifnot(
     c("S031", "S032")
   )
 )
+diagnostic_key <- c(
+  "participant", "order", "sentence_id", "ambiguity", "congruency",
+  "stage", "file"
+)
+trial_key <- setdiff(diagnostic_key, "file")
+accepted_trial_keys <- fix_diag %>%
+  filter(status == "ok") %>%
+  distinct(across(all_of(trial_key)))
+word_trial_keys <- fix %>%
+  distinct(across(all_of(trial_key)))
+prior_diagnostics <- fix_diag %>%
+  filter(status == "ok", fit_source == "read_prior")
+stopifnot(
+  nrow(fix_diag) == 2746L,
+  identical(fix_diag[diagnostic_key], eye_diag[diagnostic_key]),
+  isTRUE(all.equal(fix_diag, eye_diag, tolerance = 0)),
+  sum(fix_diag$status == "ok") == 2459L,
+  sum(fix_diag$status == "ok" & fix_diag$stage == "read") == 1233L,
+  sum(fix_diag$status == "ok" & fix_diag$stage == "translate") == 1226L,
+  sum(fix_diag$status == "ok" & fix_diag$fit_source == "read_prior") == 190L,
+  nrow(anti_join(accepted_trial_keys, word_trial_keys, by = trial_key)) == 0L,
+  nrow(anti_join(word_trial_keys, accepted_trial_keys, by = trial_key)) == 0L,
+  all(abs(prior_diagnostics$beta - prior_diagnostics$read_beta) < 1e-4),
+  all(abs(prior_diagnostics$translation_read_shift_px) <= 80),
+  all(prior_diagnostics$mode_score_ratio >= 2),
+  sum(grepl(
+    "prior_membership_cycle_resolved", fix_diag$review_flags, fixed = TRUE
+  ), na.rm = TRUE) == 1L,
+  all(
+    fix_diag$n_mapped_word_bouts + fix_diag$n_offtext_bouts +
+      fix_diag$n_unknown_bouts == fix_diag$n_raw_bouts
+  )
+)
 cat(sprintf(
   paste0(
-    "Corrected full inputs: %d rows | %d participants | %d sentence IDs | ",
+    "Line-corrected full inputs: %d rows | %d participants | %d sentence IDs | ",
     "read=%d | translate=%d\n"
   ),
   nrow(fix), length(unique(fix$participant)),
@@ -92,8 +152,8 @@ fix_without_contrastive <- fix %>%
 eye_without_contrastive <- eye %>%
   filter(!sentence_id %in% c("S031", "S032"))
 stopifnot(
-  nrow(fix_without_contrastive) == 13167L,
-  nrow(eye_without_contrastive) == 13167L,
+  nrow(fix_without_contrastive) == 18351L,
+  nrow(eye_without_contrastive) == 18351L,
   n_distinct(fix_without_contrastive$sentence_id) == 198L,
   n_distinct(eye_without_contrastive$sentence_id) == 198L
 )
@@ -170,7 +230,7 @@ rrt <- eye %>%
   filter(
     !is.na(surprisal_soft), !is.na(mono_surprisal), !is.na(log10_freq),
     !(sentence_id == "S003" & word_index == 3L),
-    regress_in == 1L, rrt_ms > 0
+    reread_occurrence == 1L, rrt_ms > 0
   )
 go_past <- eye %>%
   filter(stage == "translate") %>%
@@ -181,12 +241,12 @@ go_past <- eye %>%
     !is.na(go_past_ms), go_past_ms > 0
   )
 stopifnot(
-  nrow(primary) == 6476L,
-  nrow(pooled) == 14095L,
-  sum(pooled$stage == "translate") == 6476L,
-  sum(pooled$stage == "read") == 7619L,
-  nrow(rrt) == 3065L,
-  nrow(go_past) == 3597L,
+  nrow(primary) == 9047L,
+  nrow(pooled) == 19732L,
+  sum(pooled$stage == "translate") == 9047L,
+  sum(pooled$stage == "read") == 10685L,
+  nrow(rrt) == 4789L,
+  nrow(go_past) == 4851L,
   n_distinct(primary$sentence_id) == 200L,
   n_distinct(pooled$sentence_id) == 200L
 )
@@ -217,12 +277,12 @@ rrt_without_contrastive <- rrt %>%
 go_past_without_contrastive <- go_past %>%
   filter(!sentence_id %in% c("S031", "S032"))
 stopifnot(
-  nrow(primary_without_contrastive) == 5988L,
-  nrow(pooled_without_contrastive) == 13077L,
-  sum(pooled_without_contrastive$stage == "translate") == 5988L,
-  sum(pooled_without_contrastive$stage == "read") == 7089L,
-  nrow(rrt_without_contrastive) == 2832L,
-  nrow(go_past_without_contrastive) == 3280L,
+  nrow(primary_without_contrastive) == 8328L,
+  nrow(pooled_without_contrastive) == 18226L,
+  sum(pooled_without_contrastive$stage == "translate") == 8328L,
+  sum(pooled_without_contrastive$stage == "read") == 9898L,
+  nrow(rrt_without_contrastive) == 4406L,
+  nrow(go_past_without_contrastive) == 4397L,
   n_distinct(primary_without_contrastive$sentence_id) == 198L,
   n_distinct(pooled_without_contrastive$sentence_id) == 198L
 )

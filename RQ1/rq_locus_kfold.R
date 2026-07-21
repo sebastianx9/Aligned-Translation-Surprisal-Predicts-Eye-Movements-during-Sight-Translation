@@ -90,7 +90,7 @@ if (length(missing_fix_columns)) {
 }
 required_eye_columns <- c(
   "participant", "sentence_id", "stage", "word_index", "ambiguity",
-  "gd_ms", "rrt_ms", "regress_in"
+  "gd_ms", "rrt_ms", "reread_occurrence"
 )
 missing_eye_columns <- setdiff(required_eye_columns, names(eye))
 if (length(missing_eye_columns)) {
@@ -187,7 +187,7 @@ d_gd_full <- prepare_outcome(
   "gd_ms"
 )
 d_rrt_full <- prepare_outcome(
-  eye %>% filter(stage == "translate", regress_in == 1),
+  eye %>% filter(stage == "translate", reread_occurrence == 1),
   "rrt_ms"
 )
 

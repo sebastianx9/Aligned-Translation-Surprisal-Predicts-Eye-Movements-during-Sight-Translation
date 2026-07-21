@@ -40,7 +40,7 @@ plot_df <- df %>%
     `c[nmt]`    = z(nmt_surprisal),
     `c[mono]`   = z(mono_surprisal),
     `log(GD)`   = ifelse(!is.na(gd_ms) & gd_ms > 0, log(gd_ms), NA_real_),
-    `log(RRT)`  = ifelse(!is.na(regress_in) & regress_in == 1 & !is.na(rrt_ms) & rrt_ms > 0,
+    `log(RRT)`  = ifelse(!is.na(reread_occurrence) & reread_occurrence == 1 & !is.na(rrt_ms) & rrt_ms > 0,
                           log(rrt_ms), NA_real_)
   )
 

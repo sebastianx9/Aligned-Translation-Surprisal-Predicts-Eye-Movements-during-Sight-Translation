@@ -46,7 +46,8 @@ freq <- read.table(freq_path, sep="\t", header=TRUE,
   transmute(word_lower=lexical_form(Word),log10_freq=Lg10WF)
 required_eye_columns <- c(
   "participant", "sentence_id", "stage", "word_index",
-  "ffd_ms", "gd_ms", "go_past_ms", "rrt_ms", "regress_in"
+  "ffd_ms", "gd_ms", "go_past_ms", "rrt_ms", "reread_occurrence",
+  "first_encounter_status"
 )
 missing_eye_columns <- setdiff(required_eye_columns, names(em))
 if (length(missing_eye_columns)) {
@@ -86,7 +87,9 @@ df_gd  <- base_df %>% filter(!is.na(gd_ms),  gd_ms  > 0) %>% mutate(log_gd  = lo
 df_go_past <- base_df %>%
   filter(!is.na(go_past_ms), go_past_ms > 0) %>%
   mutate(log_go_past = log(go_past_ms))
-df_rrt <- base_df %>% filter(regress_in==1, rrt_ms > 0)  %>% mutate(log_rrt = log(rrt_ms))
+df_rrt <- base_df %>%
+  filter(reread_occurrence == 1, rrt_ms > 0) %>%
+  mutate(log_rrt = log(rrt_ms))
 cat(sprintf("FFD n=%d  GD n=%d  go-past n=%d  conditional RRT n=%d\n",
             nrow(df_ffd), nrow(df_gd), nrow(df_go_past), nrow(df_rrt)))
 
@@ -149,14 +152,14 @@ for (current_predictor in unique(res$predictor)) {
   )
 }
 attr(res, "outcome_definitions") <- c(
-  FFD="first fixation duration",
-  GD="first-pass gaze duration",
+  FFD="first fixation duration on a word's first encounter",
+  GD="gaze duration during a word's first encounter",
   `Go-past`=paste(
     "go-past fixation time from first landing through the fixation before",
     "the first subsequent rightward crossing; structurally undefined without",
     "a crossing or when first encountered by regression-in"
   ),
-  RRT="re-reading duration conditional on at least one post-first-pass fixation"
+  RRT="re-reading duration conditional on at least one post-first-encounter fixation"
 )
 res <- set_analysis_input_hashes(res, input_hashes)
 saveRDS(res, file.path(
