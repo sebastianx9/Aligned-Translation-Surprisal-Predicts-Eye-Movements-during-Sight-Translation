@@ -10,7 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
-from matplotlib.colors import Normalize
+from matplotlib.colors import LinearSegmentedColormap, Normalize
 from matplotlib.font_manager import FontProperties
 import numpy as np
 
@@ -22,6 +22,22 @@ FONT_PATH = (
     Path(__file__).resolve().parents[1] / "assets" / "fonts" / "FreeSansBold.ttf"
 )
 DISPLAY_FONT = FontProperties(fname=str(FONT_PATH), size=15)
+READ_BLUE = "#0072B2"
+TRANSLATE_ORANGE = "#E69F00"
+
+
+def _stage_colormaps(stage_color, name):
+    if stage_color == READ_BLUE:
+        light, dark = "#B9DCEC", "#003B73"
+    else:
+        light, dark = "#F9D99A", "#9A5700"
+    order_cmap = LinearSegmentedColormap.from_list(
+        f"{name}_order", [light, stage_color, dark]
+    )
+    heat_cmap = LinearSegmentedColormap.from_list(
+        f"{name}_heat", ["#FFFFFF", light, stage_color]
+    )
+    return order_cmap, heat_cmap
 
 
 def _duration_heatmap(bouts, model, x_limits, y_limits):
@@ -55,18 +71,142 @@ def _draw_words(ax, words, ranges, y=0):
         )
 
 
-def _draw_stage_panel(ax, all_bouts, line_bouts, model, words, ranges, title):
+def _draw_fixed_window_comparison(
+    ax,
+    read_all,
+    read_line,
+    read_model,
+    trans_all,
+    trans_line,
+    trans_model,
+    ranges,
+):
+    left, right = ranges[0][0], ranges[-1][1]
+    x_limits = (left - 42, right + 42)
+    x_grid = np.linspace(*x_limits, 400)
+
+    ax.axhspan(140, 260, color="#B8B8B8", alpha=0.22, zorder=0)
+    ax.axhline(200, color="#7A7A7A", linestyle="--", linewidth=0.8, zorder=1)
+
+    for model, color in (
+        (read_model, READ_BLUE),
+        (trans_model, TRANSLATE_ORANGE),
+    ):
+        predicted = np.array([model.predict(x) for x in x_grid])
+        ax.fill_between(
+            x_grid,
+            predicted - model.half_width,
+            predicted + model.half_width,
+            color=color,
+            alpha=0.10,
+            linewidth=0,
+            zorder=1,
+        )
+        ax.plot(x_grid, predicted, color=color, linewidth=1.4, zorder=2)
+
+    ax.scatter(
+        [bout.mean_x for bout in read_line],
+        [bout.mean_y for bout in read_line],
+        s=18,
+        marker="o",
+        color=READ_BLUE,
+        edgecolor="white",
+        linewidth=0.4,
+        alpha=0.78,
+        label="Oral reading",
+        zorder=3,
+    )
+    ax.scatter(
+        [bout.mean_x for bout in trans_line],
+        [bout.mean_y for bout in trans_line],
+        s=20,
+        marker="D",
+        color=TRANSLATE_ORANGE,
+        edgecolor="white",
+        linewidth=0.4,
+        alpha=0.78,
+        label="Sight translation",
+        zorder=3,
+    )
+
+    accepted = {
+        ("read", bout.sequence) for bout in read_line
+    } | {
+        ("translate", bout.sequence) for bout in trans_line
+    }
+    rejected = [
+        bout
+        for stage, bouts in (("read", read_all), ("translate", trans_all))
+        for bout in bouts
+        if (stage, bout.sequence) not in accepted
+        and bout.mean_x is not None
+        and bout.mean_y is not None
+        and x_limits[0] <= bout.mean_x <= x_limits[1]
+    ]
+    if rejected:
+        ax.scatter(
+            [bout.mean_x for bout in rejected],
+            [bout.mean_y for bout in rejected],
+            marker="x",
+            s=20,
+            linewidth=0.8,
+            color="#777777",
+            alpha=0.55,
+            zorder=2,
+        )
+
+    accepted_y = [bout.mean_y for bout in list(read_line) + list(trans_line)]
+    lower = min(120, min(accepted_y) - 18)
+    upper = max(365, max(accepted_y) + 30)
+    ax.set_xlim(x_limits)
+    ax.set_ylim(upper, lower)
+    ax.set_ylabel("vertical screen coordinate (px)", fontsize=8)
+    ax.set_xlabel("horizontal screen coordinate (px)", fontsize=8)
+    ax.tick_params(axis="both", labelsize=7, length=2)
+    ax.text(
+        x_limits[0] + 10,
+        150,
+        "Common fixed window: 200 ± 60 px",
+        fontsize=7.2,
+        color="#5F5F5F",
+        va="top",
+        zorder=4,
+    )
+    ax.legend(
+        loc="upper right",
+        frameon=False,
+        fontsize=7.2,
+        handletextpad=0.4,
+        borderaxespad=0.4,
+    )
+    ax.set_title(
+        "b  Fixed-height rule versus trial-level line estimates",
+        loc="left",
+        fontsize=9.5,
+        fontweight="bold",
+        pad=4,
+    )
+    for spine in ax.spines.values():
+        spine.set_color("#b9b9b9")
+        spine.set_linewidth(0.6)
+
+
+def _draw_stage_panel(
+    ax, all_bouts, line_bouts, model, words, ranges, title, stage_color, name
+):
     left, right = ranges[0][0], ranges[-1][1]
     x_limits = (left - 42, right + 42)
     y_limits = (-72, 72)
     density = _duration_heatmap(line_bouts, model, x_limits, y_limits)
+    order_cmap, heat_cmap = _stage_colormaps(stage_color, name)
+    ax.set_facecolor("#FFFFFF")
     ax.imshow(
         density,
         extent=(*x_limits, *y_limits),
         origin="lower",
         aspect="auto",
-        cmap="magma",
-        alpha=0.72,
+        cmap=heat_cmap,
+        alpha=0.62,
         vmin=0,
         vmax=1,
         zorder=1,
@@ -102,7 +242,7 @@ def _draw_stage_panel(ax, all_bouts, line_bouts, model, words, ranges, title):
         segments = np.stack([points[:-1], points[1:]], axis=1)
         lines = LineCollection(
             segments,
-            cmap="cividis",
+            cmap=order_cmap,
             norm=Normalize(0, max(len(ordered) - 1, 1)),
             linewidth=1.15,
             alpha=0.88,
@@ -118,7 +258,7 @@ def _draw_stage_panel(ax, all_bouts, line_bouts, model, words, ranges, title):
         xs,
         ys,
         c=order,
-        cmap="cividis",
+        cmap=order_cmap,
         s=sizes,
         edgecolor="white",
         linewidth=0.55,
@@ -213,8 +353,10 @@ def main():
     if trans_model is None:
         raise RuntimeError(f"TRANSLATE line rejected: {trans_diagnostic.reason}")
 
-    fig = plt.figure(figsize=(8.0, 5.5), facecolor="white")
-    grid = fig.add_gridspec(3, 1, height_ratios=[0.58, 1, 1], hspace=0.50)
+    fig = plt.figure(figsize=(8.0, 7.0), facecolor="white")
+    grid = fig.add_gridspec(
+        4, 1, height_ratios=[0.54, 0.82, 1, 1], hspace=0.52
+    )
     stimulus_ax = fig.add_subplot(grid[0])
     stimulus_ax.set_facecolor("#eeeeeb")
     _draw_words(stimulus_ax, words, ranges)
@@ -233,10 +375,30 @@ def main():
         spine.set_color("#c9c9c5")
         spine.set_linewidth(0.7)
 
-    read_ax = fig.add_subplot(grid[1])
-    translate_ax = fig.add_subplot(grid[2])
+    comparison_ax = fig.add_subplot(grid[1])
+    _draw_fixed_window_comparison(
+        comparison_ax,
+        read_all,
+        read_line,
+        read_model,
+        trans_all,
+        trans_line,
+        trans_model,
+        ranges,
+    )
+
+    read_ax = fig.add_subplot(grid[2])
+    translate_ax = fig.add_subplot(grid[3])
     _draw_stage_panel(
-        read_ax, read_all, read_line, read_model, words, ranges, "b  Oral reading"
+        read_ax,
+        read_all,
+        read_line,
+        read_model,
+        words,
+        ranges,
+        "c  Oral reading",
+        READ_BLUE,
+        "read",
     )
     _draw_stage_panel(
         translate_ax,
@@ -245,17 +407,11 @@ def main():
         trans_model,
         words,
         ranges,
-        "c  Sight translation",
+        "d  Sight translation",
+        TRANSLATE_ORANGE,
+        "translate",
     )
-    fig.suptitle(
-        "Sample experimental stimulus and duration-weighted gaze trajectory",
-        fontsize=11.5,
-        fontweight="bold",
-        x=0.08,
-        ha="left",
-        y=0.985,
-    )
-    fig.subplots_adjust(left=0.09, right=0.985, top=0.92, bottom=0.08)
+    fig.subplots_adjust(left=0.09, right=0.985, top=0.97, bottom=0.08)
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
