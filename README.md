@@ -224,13 +224,12 @@ check, not a different fixation-cleaning pipeline.
 
 ```text
 RQ1/rq1_kfold_elpd.R                  seven predictors vs the shared baseline
-RQ1/rq1_direct_nmt_vs_mono.R          paired NMT-minus-monolingual ELPD test
+RQ1/rq1_joint_surprisal_kfold.R        direct and bidirectional unique ELPD tests
 RQ1/rq1_mass_stoplight_robustness.R   alignment-mass and stoplight checks
 RQ1/rq_locus_kfold.R                  current/preceding/following c_mono check
 
 RQ2/rq2_joint_maximal.R               joint stage-interaction model
-RQ2/rq2_beyond_kfold.R                c_nmt beyond controls + c_mono
-RQ2/rq2_kfold_elpd.R                  nested predictive comparisons
+RQ2/rq2_interaction_kfold.R            two-model interaction predictive check
 RQ2/rq2_reading_cmono_validation.R     reading c_mono and position diagnostic
 RQ2/rq2_stoplight_importance.R        sequential stoplight sensitivity check
 
@@ -323,9 +322,10 @@ $c_\mathrm{mono}$ validation, and the neighbouring-word locus checks.
 Sensitivity results are
 written below `results/exclude_contrastive`, while model caches carry a distinct
 `_exclude_contrastive` suffix. It also keeps dependent jobs in the correct
-order: the direct RQ1 contrast, the alignment-mass check, and the
-translation-stage RQ2 nested comparison reuse the relevant RQ1 fold allocation
-and caches. Each job log records the R session, whether the pair was excluded,
+order: the three-model RQ1 comparison and the alignment-mass check reuse the
+relevant RQ1 fold allocation and caches. The RQ2 predictive job fits only the
+common-slope and stage-specific-slope models needed to test the interaction.
+Each job log records the R session, whether the pair was excluded,
 and SHA-256 hashes of the main inputs. The core CV caches and the primary
 coefficient/joint-model caches additionally store MD5 metadata for every input
 they use; scripts that reuse those caches reject them if the files change,

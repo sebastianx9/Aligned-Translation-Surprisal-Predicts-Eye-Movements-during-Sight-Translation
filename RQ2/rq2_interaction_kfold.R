@@ -1,14 +1,12 @@
 #!/usr/bin/env Rscript
 
-# ── RQ2 nested ladder, Bayesian elpd version ─────────────────────────────────
+# ── RQ2 stage-interaction predictive check ──────────────────────────────────
 #
-# Same three nested comparisons as rq2_nested_ladder.R, but scored with
-# brms + kfold() instead of lmer + plug-in Gaussian density.
+# Predictive counterpart of the joint model's condition:c_nmt coefficient,
+# scored with brms + sentence-grouped kfold cross-validation.
 #
-#   M1 = stage-varying controls + c_mono + cond:c_mono
-#   M2 = M1 + c_nmt                  -> c_nmt beyond c_mono
-#   M3 = M2 + cond:c_nmt             -> c_nmt's effect is task-modulated
-#   N1 = stage-varying controls + c_nmt + cond:c_nmt   (N2 == M3)
+#   common         = stage-varying controls + c_mono + cond:c_mono + c_nmt
+#   stage_specific = common + cond:c_nmt
 #
 # Three deliberate choices, each stated in Methods:
 #
@@ -18,7 +16,7 @@
 #    be attributed to the predictor's fixed effect.
 #
 # 2. Folds are grouped by sentence (K=10, matching Lim et al. 2024), and the
-#    SAME fold assignment is passed to all four models, so every comparison
+#    SAME fold assignment is passed to both models, so the comparison
 #    is scored on identical held-out rows.
 #
 # 3. Uncertainty is CLUSTERED AT THE SENTENCE LEVEL, not taken from
@@ -57,7 +55,7 @@ exclude_contrastive <- parse_bool(
 )
 dir.create(OUT, recursive = TRUE, showWarnings = FALSE)
 
-# ── Data prep (identical to rq2_nested_ladder.R / rq2_brm_joint.R) ───────────
+# ── Data prep (identical to the joint coefficient model) ────────────────────
 fix_path <- file.path(DATA_DIR, "fixation_durations_word.csv")
 nmt_path <- file.path(DATA_DIR, "nmt_surprisal_soft_word.csv")
 mono_path <- file.path(DATA_DIR, "monolingual_surprisal_word.csv")
@@ -127,10 +125,9 @@ CTRL <- "cond * (c_wlen + c_wpos + c_freq + ambiguity)"
 f <- function(rhs) as.formula(paste("log_tfd ~", CTRL, "+", rhs, "+", RE))
 
 forms <- list(
-  M1 = f("c_mono + cond:c_mono"),
-  M2 = f("c_mono + cond:c_mono + c_nmt"),
-  M3 = f("c_mono + cond:c_mono + c_nmt + cond:c_nmt"),
-  N1 = f("c_nmt + cond:c_nmt")
+  common = f("c_mono + cond:c_mono + c_nmt"),
+  stage_specific =
+    f("c_mono + cond:c_mono + c_nmt + cond:c_nmt")
 )
 
 priors <- c(prior(normal(0, 1), class=b),
@@ -144,10 +141,10 @@ dir.create(CACHE, showWarnings=FALSE)
 ptw <- list()   # pointwise elpd_kfold, one vector of length N per model
 kfs <- list()   # full kfold objects, kept for the official loo_compare() cross-check
 for (nm in names(forms)) {
-  # v4 encodes the bound contrastive-pair allocation and longer sampling.
+  # v1 encodes the two-model interaction comparison and longer sampling.
   path <- file.path(
     CACHE,
-    variant_filename(sprintf("kfold_v4_%s.rds", nm),
+    variant_filename(sprintf("rq2int_v1_%s.rds", nm),
                      exclude_contrastive)
   )
   if (file.exists(path)) {
@@ -175,7 +172,7 @@ for (nm in names(forms)) {
   kfs[[nm]] <- kf
 }
 
-# ── The three rungs ──────────────────────────────────────────────────────────
+# ── Interaction comparison ──────────────────────────────────────────────────
 sid <- df$sentence_id
 
 sign_flip_p <- function(d_s, n_perm = 10000) {
@@ -206,19 +203,18 @@ report <- function(nm, question, d_i) {
 }
 
 cat("\n══════════════════════════════════════════════════════════════════\n")
-cat("RQ2 NESTED LADDER — brms + sentence-grouped 10-fold, elpd\n")
+cat("RQ2 STAGE INTERACTION — brms + sentence-grouped 10-fold, elpd\n")
 cat(sprintf("RE (identical across every pair): %s\n", RE))
 cat(sprintf("N = %d observations, J = %d sentence IDs, G = %d inference clusters\n",
             N, J, G))
 cat("══════════════════════════════════════════════════════════════════\n")
 
 res <- list(
-  beyond  = report("elpd_diff(M2 - M1)", "Does c_nmt add predictive power beyond c_mono?",
-                   ptw$M2 - ptw$M1),
-  modul   = report("elpd_diff(M3 - M2)", "Is c_nmt's effect task-modulated?",
-                   ptw$M3 - ptw$M2),
-  reverse = report("elpd_diff(M3 - N1)", "Does c_mono add anything beyond c_nmt?",
-                   ptw$M3 - ptw$N1)
+  interaction = report(
+    "elpd_diff(stage_specific - common)",
+    "Does allowing c_nmt to vary by stage improve held-out prediction?",
+    ptw$stage_specific - ptw$common
+  )
 )
 
 # ── Cross-check: the official brms/loo loo_compare() output ──────────────────
@@ -236,11 +232,37 @@ official <- function(nm, kf_base, kf_target) {
   cat(sprintf("  loo_compare se_diff = %.3f   (cf. se_naive above)\n",
               max(lc[, "se_diff"])))   # best model's row is 0; the other is the diff SE
 }
-official("M2 vs M1", kfs$M1, kfs$M2)
-official("M3 vs M2", kfs$M2, kfs$M3)
-official("M3 vs N1", kfs$N1, kfs$M3)
+official(
+  "stage_specific vs common",
+  kfs$common,
+  kfs$stage_specific
+)
 
-output_name <- variant_filename("rq2_kfold_elpd.rds", exclude_contrastive)
+result_table <- data.frame(
+  contrast = "stage_specific - common",
+  delta_elpd = res$interaction$elpd_diff,
+  sentence_clustered_se = res$interaction$se_cluster,
+  ci_95_low = res$interaction$elpd_diff - 1.96 * res$interaction$se_cluster,
+  ci_95_high = res$interaction$elpd_diff + 1.96 * res$interaction$se_cluster,
+  p_signflip_one_sided = res$interaction$p,
+  per_word_delta = res$interaction$elpd_diff / N,
+  n_observations = N,
+  n_sentence_ids = J,
+  n_inference_clusters = G,
+  exclude_contrastive = exclude_contrastive
+)
+write.csv(
+  result_table,
+  file.path(
+    OUT,
+    variant_filename("rq2_interaction_kfold_results.csv",
+                     exclude_contrastive)
+  ),
+  row.names = FALSE
+)
+
+output_name <- variant_filename("rq2_interaction_kfold.rds",
+                                exclude_contrastive)
 saveRDS(list(pointwise=ptw, sentence_id=sid, res=res, N=N,
              J=J, G=G, S=G, folds=fold_vec,
              exclude_contrastive=exclude_contrastive,

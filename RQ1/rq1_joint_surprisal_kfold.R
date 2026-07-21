@@ -1,9 +1,11 @@
 #!/usr/bin/env Rscript
 
-# Translation-stage nested comparison:
-#   controls + c_mono + c_nmt  versus  controls + c_mono.
-# Uses the same complete-case sample, grouped folds, priors, and cache naming as
-# RQ1/rq1_kfold_elpd.R, so the c_mono model can be reused after RQ1 finishes.
+# RQ1 translation-stage joint-surprisal comparisons.
+# The three models already used by RQ1 provide two incremental contrasts:
+#   controls + c_mono + c_nmt  versus  controls + c_mono;
+#   controls + c_mono + c_nmt  versus  controls + c_nmt.
+# They use the same complete-case sample, folds, priors, and cache names as
+# rq1_kfold_elpd.R, so the single-predictor models are reused after RQ1 finishes.
 
 suppressMessages({library(brms); library(dplyr)})
 options(mc.cores = 4, warn = 1)
@@ -170,50 +172,127 @@ fit_kfold <- function(name, formula) {
 mono_formula <- as.formula(paste(
   "log_tfd ~", CTRL, "+ c_mono +", RE
 ))
+nmt_formula <- as.formula(paste(
+  "log_tfd ~", CTRL, "+ c_nmt +", RE
+))
 both_formula <- as.formula(paste(
   "log_tfd ~", CTRL, "+ c_mono + c_nmt +", RE
 ))
-ptw_mono <- fit_kfold("c_mono", mono_formula)$pointwise[, "elpd_kfold"]
-ptw_both <- fit_kfold("c_mono_nmt", both_formula)$pointwise[, "elpd_kfold"]
-
-pointwise_delta <- ptw_both - ptw_mono
-sentence_delta <- cluster_delta_sums(pointwise_delta, sid)
-delta_elpd <- sum(pointwise_delta)
-clustered_se <- sd(sentence_delta) * sqrt(G)
-set.seed(42)
-permuted <- replicate(
-  10000L,
-  sum(sentence_delta * sample(c(-1, 1), G, replace = TRUE))
+pointwise <- list(
+  mono = fit_kfold("c_mono", mono_formula)$pointwise[, "elpd_kfold"],
+  nmt = fit_kfold("c_nmt", nmt_formula)$pointwise[, "elpd_kfold"],
+  both = fit_kfold("c_mono_nmt", both_formula)$pointwise[, "elpd_kfold"]
 )
-p_signflip <- (1 + sum(permuted >= delta_elpd)) / 10001
+stopifnot(all(vapply(pointwise, length, integer(1)) == N))
 
-result <- list(
-  elpd_diff = delta_elpd,
-  se_cluster = clustered_se,
-  p = p_signflip,
-  per_word = delta_elpd / N,
-  pointwise_mono = ptw_mono,
-  pointwise_both = ptw_both,
-  sid = sid,
+n_perm <- 10000L
+seed <- 42L
+evaluate_contrast <- function(label, target, baseline) {
+  pointwise_delta <- pointwise[[target]] - pointwise[[baseline]]
+  cluster_id <- contrastive_group_id(sid)
+  cluster_results <- tibble(
+    contrast = label,
+    sentence_id = sid,
+    cluster_id = cluster_id,
+    fold = fold_vec,
+    delta_elpd = pointwise_delta
+  ) %>%
+    group_by(contrast, cluster_id) %>%
+    summarise(
+      sentence_ids = paste(sort(unique(sentence_id)), collapse = "+"),
+      fold = first(fold),
+      n_observations = n(),
+      delta_elpd = sum(delta_elpd),
+      .groups = "drop"
+    ) %>%
+    arrange(cluster_id)
+  cluster_delta <- cluster_results$delta_elpd
+  delta_elpd <- sum(pointwise_delta)
+  clustered_se <- sd(cluster_delta) * sqrt(length(cluster_delta))
+  set.seed(seed)
+  permuted <- replicate(
+    n_perm,
+    sum(cluster_delta * sample(c(-1, 1), length(cluster_delta), TRUE))
+  )
+  result <- tibble(
+    contrast = label,
+    delta_elpd = delta_elpd,
+    sentence_clustered_se = clustered_se,
+    ci_95_low = delta_elpd - 1.96 * clustered_se,
+    ci_95_high = delta_elpd + 1.96 * clustered_se,
+    p_signflip_one_sided =
+      (1 + sum(permuted >= delta_elpd)) / (n_perm + 1),
+    p_signflip_two_sided =
+      (1 + sum(abs(permuted) >= abs(delta_elpd))) / (n_perm + 1),
+    per_word_delta = delta_elpd / N,
+    n_observations = N,
+    n_sentence_ids = J,
+    n_inference_clusters = length(cluster_delta),
+    n_permutations = n_perm,
+    seed = seed,
+    contrastive_pair = ifelse(exclude_contrastive, "excluded", "one cluster")
+  )
+  list(result = result, clusters = cluster_results,
+       pointwise_delta = pointwise_delta)
+}
+
+comparisons <- list(
+  evaluate_contrast("M_nmt - M_mono", "nmt", "mono"),
+  evaluate_contrast("M_both - M_mono", "both", "mono"),
+  evaluate_contrast("M_both - M_nmt", "both", "nmt")
+)
+results <- bind_rows(lapply(comparisons, `[[`, "result"))
+cluster_results <- bind_rows(lapply(comparisons, `[[`, "clusters"))
+
+results_name <- variant_filename(
+  "rq1_joint_surprisal_results.csv", exclude_contrastive
+)
+cluster_name <- variant_filename(
+  "rq1_joint_surprisal_cluster_deltas.csv", exclude_contrastive
+)
+write.csv(results, file.path(OUT, results_name), row.names = FALSE)
+write.csv(cluster_results, file.path(OUT, cluster_name), row.names = FALSE)
+
+# Preserve the established direct-comparison filenames for the dissertation
+# tables while making the three-model result the authoritative source.
+direct_result_name <- variant_filename(
+  "rq1_direct_nmt_vs_mono_results.csv", exclude_contrastive
+)
+direct_delta_name <- variant_filename(
+  "rq1_direct_nmt_vs_mono_sentence_deltas.csv", exclude_contrastive
+)
+write.csv(
+  filter(results, contrast == "M_nmt - M_mono"),
+  file.path(OUT, direct_result_name), row.names = FALSE
+)
+write.csv(
+  filter(cluster_results, contrast == "M_nmt - M_mono") %>%
+    select(-contrast),
+  file.path(OUT, direct_delta_name), row.names = FALSE
+)
+
+output <- list(
+  results = results,
+  cluster_deltas = cluster_results,
+  pointwise = pointwise,
+  pointwise_contrasts = setNames(
+    lapply(comparisons, `[[`, "pointwise_delta"),
+    results$contrast
+  ),
+  sentence_id = sid,
+  folds = fold_vec,
   N = N,
   J = J,
   G = G,
-  S = G,
   exclude_contrastive = exclude_contrastive,
-  folds = fold_vec,
   input_hashes = input_hashes
 )
-print(data.frame(
-  contrast = "c_nmt beyond controls + c_mono",
-  delta_elpd = delta_elpd,
-  clustered_se = clustered_se,
-  p_signflip_one_sided = p_signflip,
-  n_observations = N,
-  n_sentence_ids = J,
-  n_inference_clusters = G
-))
 saveRDS(
-  result,
-  file.path(OUT, variant_filename("rq2_beyond_kfold.rds",
+  output,
+  file.path(OUT, variant_filename("rq1_joint_surprisal_kfold.rds",
                                   exclude_contrastive))
 )
+
+cat("\nRQ1 joint-surprisal predictive comparisons\n")
+print(results, width = Inf)
+cat("\nSaved ", results_name, " and ", cluster_name, "\n", sep = "")

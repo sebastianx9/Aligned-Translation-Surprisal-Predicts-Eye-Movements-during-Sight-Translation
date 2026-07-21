@@ -2,7 +2,7 @@
 
 # ── RQ1 brms kfold elpd — 7 predictors vs baseline, TRANSLATE stage ───────────
 # Bayesian replacement for the lmer 200-fold Table 3. Same convention as
-# rq2_kfold_elpd.R: sentence-grouped 10-fold (shared folds across all models),
+# the RQ2 interaction check: sentence-grouped 10-fold (shared folds),
 # per-model pointwise elpd, sentence-clustered SE (NOT loo_compare's se_diff),
 # sentence-level sign-flip permutation. Within-translate z-scoring.
 # lmer 200-fold values are preserved in memory / rq1_loo_authoritative.rds.

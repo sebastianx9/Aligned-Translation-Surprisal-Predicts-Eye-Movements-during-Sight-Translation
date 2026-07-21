@@ -39,12 +39,11 @@ source(file.path(repo_dir, "R", "analysis_design.R"))
 analysis_scripts <- file.path(repo_dir, c(
   "RQ1/rq1_coef_maximal.R",
   "RQ1/rq1_kfold_elpd.R",
-  "RQ1/rq1_direct_nmt_vs_mono.R",
+  "RQ1/rq1_joint_surprisal_kfold.R",
   "RQ1/rq1_mass_stoplight_robustness.R",
   "RQ1/rq_locus_kfold.R",
   "RQ2/rq2_joint_maximal.R",
-  "RQ2/rq2_beyond_kfold.R",
-  "RQ2/rq2_kfold_elpd.R",
+  "RQ2/rq2_interaction_kfold.R",
   "RQ2/rq2_reading_cmono_validation.R",
   "RQ3/rq3_kfold_elpd.R"
 ))

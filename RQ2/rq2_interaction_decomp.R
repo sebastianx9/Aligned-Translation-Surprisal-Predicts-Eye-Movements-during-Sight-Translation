@@ -1,3 +1,6 @@
+# HISTORICAL exploratory script for the superseded four-model ladder. It is
+# not used by the authoritative CSF pipeline and expects deprecated M2/M3
+# caches. Use RQ2/rq2_interaction_kfold.R for the reported c_nmt comparison.
 # Stage decomposition of BOTH interaction gains (condition:c_nmt, condition:c_mono).
 # condition:c_nmt gain = M3 - M2   (M2, M3 already cached)
 # condition:c_mono gain = M3 - M3_nomonoint, where M3_nomonoint drops cond:c_mono

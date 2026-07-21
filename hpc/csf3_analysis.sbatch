@@ -60,7 +60,9 @@ case "${ANALYSIS}" in
     ;;
   rq1_cv)
     run_r "${repo_dir}/RQ1/rq1_kfold_elpd.R"
-    run_r "${repo_dir}/RQ1/rq1_direct_nmt_vs_mono.R"
+    ;;
+  rq1_joint_predictive)
+    run_r "${repo_dir}/RQ1/rq1_joint_surprisal_kfold.R"
     ;;
   rq1_robustness)
     run_r "${repo_dir}/RQ1/rq1_mass_stoplight_robustness.R"
@@ -78,11 +80,8 @@ case "${ANALYSIS}" in
       "--exclude-contrastive=${exclude_contrastive}" \
       "--include-stoplight=true"
     ;;
-  rq2_beyond)
-    run_r "${repo_dir}/RQ2/rq2_beyond_kfold.R"
-    ;;
-  rq2_cv)
-    run_r "${repo_dir}/RQ2/rq2_kfold_elpd.R"
+  rq2_interaction_cv)
+    run_r "${repo_dir}/RQ2/rq2_interaction_kfold.R"
     ;;
   rq2_reading_validation)
     run_r "${repo_dir}/RQ2/rq2_reading_cmono_validation.R"

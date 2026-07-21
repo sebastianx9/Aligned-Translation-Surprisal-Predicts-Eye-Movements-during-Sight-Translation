@@ -1,3 +1,6 @@
+# HISTORICAL exploratory script for the superseded four-model ladder. It is
+# not used by the authoritative CSF pipeline and expects deprecated M2/M3
+# caches. Use RQ2/rq2_interaction_kfold.R for the reported comparison.
 # Stratified evaluation of the condition:c_nmt interaction gain.
 # The pooled M3-M2 held-out gain dilutes a translation-related stage interaction over
 # the mostly-reading sample (see "Attenuation of interaction gains" in Methods).

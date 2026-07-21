@@ -41,42 +41,42 @@ submit() {
 
 rq1_coef_id="$(submit rq1_coef)"
 rq1_cv_id="$(submit rq1_cv)"
+rq1_joint_id="$(submit rq1_joint_predictive "${rq1_cv_id}")"
 rq2_joint_id="$(submit rq2_joint)"
-rq2_cv_id="$(submit rq2_cv)"
+rq2_interaction_id="$(submit rq2_interaction_cv)"
 rq3_cv_id="$(submit rq3_cv)"
 rq1_locus_id="$(submit rq1_locus)"
 rq2_reading_validation_id="$(submit rq2_reading_validation)"
 rq1_robustness_id="$(submit rq1_robustness "${rq1_cv_id}")"
-rq2_beyond_id="$(submit rq2_beyond "${rq1_cv_id}")"
 rq2_stoplight_id="$(submit rq2_joint_stoplight "${rq2_joint_id}")"
 
 # Leave-pair-out sensitivity analyses. These are matched refits, not results
 # obtained by subtracting S031/S032 from the primary pointwise ELPD values.
 rq1_coef_excl_id="$(submit rq1_coef "${rq1_coef_id}" true rq1_coef_excl "${sensitivity_output_dir}")"
 rq1_cv_excl_id="$(submit rq1_cv "${rq1_cv_id}" true rq1_cv_excl "${sensitivity_output_dir}")"
+rq1_joint_excl_id="$(submit rq1_joint_predictive "${rq1_cv_excl_id}" true rq1_joint_excl "${sensitivity_output_dir}")"
 rq2_joint_excl_id="$(submit rq2_joint "${rq2_joint_id}" true rq2_joint_excl "${sensitivity_output_dir}")"
-rq2_cv_excl_id="$(submit rq2_cv "${rq2_cv_id}" true rq2_cv_excl "${sensitivity_output_dir}")"
+rq2_interaction_excl_id="$(submit rq2_interaction_cv "${rq2_interaction_id}" true rq2_interaction_excl "${sensitivity_output_dir}")"
 rq3_cv_excl_id="$(submit rq3_cv "${rq3_cv_id}" true rq3_cv_excl "${sensitivity_output_dir}")"
-rq2_beyond_excl_id="$(submit rq2_beyond "${rq1_cv_excl_id}" true rq2_beyond_excl "${sensitivity_output_dir}")"
 rq1_locus_excl_id="$(submit rq1_locus "${rq1_locus_id}" true rq1_locus_excl "${sensitivity_output_dir}")"
 rq2_reading_validation_excl_id="$(submit rq2_reading_validation "${rq2_reading_validation_id}" true rq2_reading_excl "${sensitivity_output_dir}")"
 
 printf '%-24s %s\n' \
   rq1_coef "${rq1_coef_id}" \
   rq1_cv "${rq1_cv_id}" \
+  rq1_joint_predictive "${rq1_joint_id}" \
   rq1_robustness "${rq1_robustness_id}" \
   rq2_joint "${rq2_joint_id}" \
   rq2_joint_stoplight "${rq2_stoplight_id}" \
-  rq2_beyond "${rq2_beyond_id}" \
-  rq2_cv "${rq2_cv_id}" \
+  rq2_interaction_cv "${rq2_interaction_id}" \
   rq3_cv "${rq3_cv_id}" \
   rq1_locus "${rq1_locus_id}" \
   rq2_reading_validation "${rq2_reading_validation_id}" \
   rq1_coef_exclude_pair "${rq1_coef_excl_id}" \
   rq1_cv_exclude_pair "${rq1_cv_excl_id}" \
+  rq1_joint_exclude_pair "${rq1_joint_excl_id}" \
   rq2_joint_exclude_pair "${rq2_joint_excl_id}" \
-  rq2_beyond_exclude_pair "${rq2_beyond_excl_id}" \
-  rq2_cv_exclude_pair "${rq2_cv_excl_id}" \
+  rq2_interaction_exclude_pair "${rq2_interaction_excl_id}" \
   rq3_cv_exclude_pair "${rq3_cv_excl_id}" \
   rq1_locus_exclude_pair "${rq1_locus_excl_id}" \
   rq2_reading_exclude_pair "${rq2_reading_validation_excl_id}"
