@@ -3,7 +3,7 @@
 # Submit the small post-audit analysis set after the main CSF run:
 #   * reading-stage c_nmt bridge (primary and leave-pair-out);
 #   * targeted longer RQ3 coefficient refits (no k-fold rerun);
-#   * diagnostics omitted from the original dependency graph.
+#   * leave-pair-out diagnostics omitted from the original dependency graph.
 # Usage: hpc/submit_followup_jobs.sh DATA_DIR [OUTPUT_DIR]
 
 set -euo pipefail
@@ -83,10 +83,6 @@ rq1_exclude_diag_id="$(submit_diagnostic \
 rq2_exclude_diag_id="$(submit_diagnostic \
   rq2_joint_excl_diag \
   "${data_dir}/brm_cache/rq2_joint_maximal_v4_exclude_contrastive.rds")"
-rq2_stoplight_diag_id="$(submit_diagnostic \
-  rq2_stoplight_diag \
-  "${data_dir}/brm_cache/rq2rob_joint_stoplight_v3.rds")"
-
 printf 'Git commit: %s\n' "${repo_commit}"
 printf 'Input manifest SHA-256: %s\n' "${manifest_sha256}"
 printf '%-28s %s\n' \
@@ -95,5 +91,4 @@ printf '%-28s %s\n' \
   rq3_coef_long "${rq3_long_primary_id}" \
   rq3_coef_long_exclude "${rq3_long_exclude_id}" \
   rq1_coef_exclude_diagnostics "${rq1_exclude_diag_id}" \
-  rq2_joint_exclude_diagnostics "${rq2_exclude_diag_id}" \
-  rq2_stoplight_diagnostics "${rq2_stoplight_diag_id}"
+  rq2_joint_exclude_diagnostics "${rq2_exclude_diag_id}"
