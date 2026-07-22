@@ -111,8 +111,14 @@ case "${ANALYSIS}" in
   rq2_reading_validation)
     run_r "${repo_dir}/RQ2/rq2_reading_cmono_validation.R"
     ;;
+  rq2_reading_cnmt_bridge)
+    run_r "${repo_dir}/RQ2/rq2_reading_cnmt_bridge.R"
+    ;;
   rq3_cv)
     run_r "${repo_dir}/RQ3/rq3_kfold_elpd.R"
+    ;;
+  rq3_coefficient_long_refit)
+    run_r "${repo_dir}/RQ3/rq3_coefficient_long_refit.R"
     ;;
   *)
     echo "Unknown ANALYSIS=${ANALYSIS}" >&2
