@@ -15,6 +15,7 @@ output_dir="${2:-${data_dir}/results}"
 jobscript_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "${jobscript_dir}/.." && pwd)"
 analysis_jobscript="${jobscript_dir}/csf3_analysis.sbatch"
+diagnostic_jobscript="${jobscript_dir}/csf3_diagnose_fit.sbatch"
 repo_commit="$(git -C "${repo_dir}" rev-parse HEAD)"
 
 if [[ -n "$(git -C "${repo_dir}" status --porcelain --untracked-files=no)" ]]; then
@@ -39,6 +40,17 @@ submitted="$(sbatch --parsable --job-name=rq2_stage_sigma \
   --export="${exports}" "${analysis_jobscript}")"
 job_id="${submitted%%;*}"
 
+fit_path="${data_dir}/brm_cache/rq2_joint_stage_sigma_v1.rds"
+diagnostic_output_dir="${output_dir}/diagnostics"
+mkdir -p "${diagnostic_output_dir}"
+diagnostic_exports="ALL,DISSERTATION_REPO_DIR=${repo_dir},BRMS_FIT_PATH=${fit_path},BRMS_DIAGNOSTIC_OUTPUT_DIR=${diagnostic_output_dir},EXPECTED_GIT_COMMIT=${repo_commit}"
+diagnostic_submitted="$(sbatch --parsable \
+  --job-name=rq2_sigma_diagnostics \
+  --dependency="afterok:${job_id}" \
+  --export="${diagnostic_exports}" "${diagnostic_jobscript}")"
+diagnostic_id="${diagnostic_submitted%%;*}"
+
 printf 'Git commit: %s\n' "${repo_commit}"
 printf 'Input manifest SHA-256: %s\n' "${manifest_sha256}"
 printf 'rq2_stage_sigma %s\n' "${job_id}"
+printf 'rq2_sigma_diagnostics %s\n' "${diagnostic_id}"
