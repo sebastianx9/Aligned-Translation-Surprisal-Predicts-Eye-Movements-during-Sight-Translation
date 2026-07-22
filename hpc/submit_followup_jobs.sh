@@ -3,7 +3,8 @@
 # Submit the small post-audit analysis set after the main CSF run:
 #   * reading-stage c_nmt bridge (primary and leave-pair-out);
 #   * targeted longer RQ3 coefficient refits (no k-fold rerun);
-#   * leave-pair-out diagnostics omitted from the original dependency graph.
+#   * leave-pair-out diagnostics omitted from the original dependency graph;
+#   * posterior-predictive and residual checks after the primary RQ3 refits.
 # Usage: hpc/submit_followup_jobs.sh DATA_DIR [OUTPUT_DIR]
 
 set -euo pipefail
@@ -23,6 +24,7 @@ jobscript_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_dir="$(cd "${jobscript_dir}/.." && pwd)"
 analysis_jobscript="${jobscript_dir}/csf3_analysis.sbatch"
 diagnostic_jobscript="${jobscript_dir}/csf3_diagnose_fit.sbatch"
+assumption_jobscript="${jobscript_dir}/csf3_assumption_checks.sbatch"
 repo_commit="$(git -C "${repo_dir}" rev-parse HEAD)"
 
 if [[ -n "$(git -C "${repo_dir}" status --porcelain --untracked-files=no)" ]]; then
@@ -83,6 +85,11 @@ rq1_exclude_diag_id="$(submit_diagnostic \
 rq2_exclude_diag_id="$(submit_diagnostic \
   rq2_joint_excl_diag \
   "${data_dir}/brm_cache/rq2_joint_maximal_v4_exclude_contrastive.rds")"
+assumption_exports="ALL,DISSERTATION_REPO_DIR=${repo_dir},DISSERTATION_DATA_DIR=${data_dir},DISSERTATION_OUTPUT_DIR=${output_dir},EXPECTED_GIT_COMMIT=${repo_commit}"
+assumption_id="$(sbatch --parsable --job-name=model_assumptions \
+  --dependency="afterok:${rq3_long_primary_id}" \
+  --export="${assumption_exports}" "${assumption_jobscript}")"
+assumption_id="${assumption_id%%;*}"
 printf 'Git commit: %s\n' "${repo_commit}"
 printf 'Input manifest SHA-256: %s\n' "${manifest_sha256}"
 printf '%-28s %s\n' \
@@ -91,4 +98,5 @@ printf '%-28s %s\n' \
   rq3_coef_long "${rq3_long_primary_id}" \
   rq3_coef_long_exclude "${rq3_long_exclude_id}" \
   rq1_coef_exclude_diagnostics "${rq1_exclude_diag_id}" \
-  rq2_joint_exclude_diagnostics "${rq2_exclude_diag_id}"
+  rq2_joint_exclude_diagnostics "${rq2_exclude_diag_id}" \
+  model_assumption_checks "${assumption_id}"
