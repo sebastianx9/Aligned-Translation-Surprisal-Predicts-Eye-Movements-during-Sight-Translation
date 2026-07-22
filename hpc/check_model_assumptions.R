@@ -64,6 +64,29 @@ statistic_vector <- function(x) {
 ppc_rows <- list()
 residual_rows <- list()
 
+lag1_correlation <- function(residual, model_data) {
+  required <- c("participant", "sentence_id", "word_index")
+  if (!all(required %in% names(model_data))) return(NA_real_)
+  stage_name <- intersect(c("condition", "stage"), names(model_data))
+  group_values <- list(
+    participant = model_data$participant,
+    sentence_id = model_data$sentence_id
+  )
+  if (length(stage_name)) group_values$stage <- model_data[[stage_name[[1]]]]
+  group_id <- do.call(paste, c(group_values, sep = "\r"))
+  pairs <- lapply(split(seq_along(residual), group_id), function(index) {
+    index <- index[order(model_data$word_index[index])]
+    if (length(index) < 2L) return(NULL)
+    cbind(previous = residual[index[-length(index)]],
+          current = residual[index[-1L]])
+  })
+  pairs <- pairs[lengths(pairs) > 0L]
+  if (!length(pairs)) return(NA_real_)
+  pair_matrix <- do.call(rbind, pairs)
+  cor(pair_matrix[, "previous"], pair_matrix[, "current"],
+      use = "complete.obs")
+}
+
 for (i in seq_len(nrow(specs))) {
   model_name <- specs$model[[i]]
   fit_name <- specs$fit[[i]]
@@ -80,6 +103,8 @@ for (i in seq_len(nrow(specs))) {
   yrep <- posterior_predict(fit, ndraws = 200)
   fitted_mean <- fitted(fit, summary = TRUE)[, "Estimate"]
   residual <- y - fitted_mean
+  model_data <- fit$data
+  focal_predictors <- intersect(c("c_nmt", "c_mono"), names(model_data))
 
   observed_stats <- statistic_vector(y)
   replicated_stats <- t(apply(yrep, 1L, statistic_vector))
@@ -108,6 +133,13 @@ for (i in seq_len(nrow(specs))) {
     residual_skewness = skewness(residual),
     correlation_abs_residual_fitted = cor(abs(residual), fitted_mean),
     normal_qq_correlation = cor(qq_theoretical, qq_observed),
+    lag1_residual_correlation = lag1_correlation(residual, model_data),
+    correlation_residual_c_nmt = if ("c_nmt" %in% focal_predictors) {
+      cor(residual, model_data$c_nmt, use = "complete.obs")
+    } else NA_real_,
+    correlation_residual_c_mono = if ("c_mono" %in% focal_predictors) {
+      cor(residual, model_data$c_mono, use = "complete.obs")
+    } else NA_real_,
     stringsAsFactors = FALSE
   )
 
@@ -139,6 +171,33 @@ for (i in seq_len(nrow(specs))) {
   ), width = 10, height = 3.5)
   gridExtra::grid.arrange(p_density, p_residual, p_qq, ncol = 3)
   dev.off()
+
+  if (length(focal_predictors)) {
+    pdf(file.path(
+      output_dir,
+      paste0(gsub("[^A-Za-z0-9]+", "_", tolower(model_name)),
+             "_focal_linearity.pdf")
+    ), width = 5.2, height = 3.8)
+    for (predictor in focal_predictors) {
+      focal_data <- data.frame(
+        predictor = model_data[[predictor]], residual = residual
+      )
+      print(
+        ggplot(focal_data, aes(predictor, residual)) +
+          geom_hline(yintercept = 0, colour = "grey55",
+                     linetype = "dashed") +
+          geom_point(alpha = .08, size = .35, colour = "#0072B2") +
+          geom_smooth(method = "loess", se = TRUE, colour = "#D55E00",
+                      fill = "#D55E00", alpha = .15, linewidth = .7) +
+          labs(
+            title = paste(model_name, "residuals by", predictor),
+            x = predictor, y = "Observed - fitted"
+          ) +
+          theme_minimal(base_size = 10)
+      )
+    }
+    dev.off()
+  }
 }
 
 ppc_output <- do.call(rbind, ppc_rows)

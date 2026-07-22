@@ -383,7 +383,8 @@ This submits the reading-stage $c_\mathrm{nmt}$ bridge, longer targeted RQ3
 coefficient refits, the two diagnostics omitted from the original sensitivity
 dependency graph, and a no-refit model-assumption job. The latter reads the
 cached primary coefficient models and writes posterior-predictive summaries,
-residual summaries, and density/residual/Q--Q plots under
+residual summaries (including within-trial lag-1 correlation), and
+density/residual/Q--Q and focal-predictor linearity plots under
 `results/assumptions`. It waits for the primary longer RQ3 refit so that the
 FFD and GD checks use the improved chains.
 
