@@ -108,6 +108,9 @@ case "${ANALYSIS}" in
   rq2_interaction_cv)
     run_r "${repo_dir}/RQ2/rq2_interaction_kfold.R"
     ;;
+  rq2_stage_sigma)
+    run_r "${repo_dir}/RQ2/rq2_stage_sigma_sensitivity.R"
+    ;;
   rq2_reading_validation)
     run_r "${repo_dir}/RQ2/rq2_reading_cmono_validation.R"
     ;;
