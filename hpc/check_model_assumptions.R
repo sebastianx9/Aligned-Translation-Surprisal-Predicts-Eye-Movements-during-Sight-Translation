@@ -63,9 +63,10 @@ statistic_vector <- function(x) {
 
 ppc_rows <- list()
 residual_rows <- list()
+residual_stage_rows <- list()
 
 lag1_correlation <- function(residual, model_data) {
-  required <- c("participant", "sentence_id", "word_index")
+  required <- c("participant", "sentence_id")
   if (!all(required %in% names(model_data))) return(NA_real_)
   stage_name <- intersect(c("condition", "stage"), names(model_data))
   group_values <- list(
@@ -75,7 +76,16 @@ lag1_correlation <- function(residual, model_data) {
   if (length(stage_name)) group_values$stage <- model_data[[stage_name[[1]]]]
   group_id <- do.call(paste, c(group_values, sep = "\r"))
   pairs <- lapply(split(seq_along(residual), group_id), function(index) {
-    index <- index[order(model_data$word_index[index])]
+    # brms stores rows in the order supplied to the model but retains only
+    # formula variables.  The analysis data were supplied in increasing word
+    # order within participant-sentence-stage trials.  Prefer an explicit
+    # word_index when available; otherwise preserve that stored within-trial
+    # row order.
+    if ("word_index" %in% names(model_data)) {
+      index <- index[order(model_data$word_index[index])]
+    } else {
+      index <- sort(index)
+    }
     if (length(index) < 2L) return(NULL)
     cbind(previous = residual[index[-length(index)]],
           current = residual[index[-1L]])
@@ -134,6 +144,11 @@ for (i in seq_len(nrow(specs))) {
     correlation_abs_residual_fitted = cor(abs(residual), fitted_mean),
     normal_qq_correlation = cor(qq_theoretical, qq_observed),
     lag1_residual_correlation = lag1_correlation(residual, model_data),
+    lag1_ordering = if ("word_index" %in% names(model_data)) {
+      "word_index"
+    } else {
+      "stored within-trial row order"
+    },
     correlation_residual_c_nmt = if ("c_nmt" %in% focal_predictors) {
       cor(residual, model_data$c_nmt, use = "complete.obs")
     } else NA_real_,
@@ -142,6 +157,30 @@ for (i in seq_len(nrow(specs))) {
     } else NA_real_,
     stringsAsFactors = FALSE
   )
+
+  stage_name <- intersect(c("condition", "stage"), names(model_data))
+  if (length(stage_name)) {
+    stage_value <- as.character(model_data[[stage_name[[1]]]])
+  } else {
+    stage_value <- rep("single-stage model", length(residual))
+  }
+  stage_groups <- split(seq_along(residual), stage_value)
+  residual_stage_rows[[i]] <- do.call(rbind, lapply(
+    names(stage_groups),
+    function(stage) {
+      index <- stage_groups[[stage]]
+      data.frame(
+        model = model_name,
+        fit = fit_name,
+        stage = stage,
+        n_observations = length(index),
+        residual_mean = mean(residual[index]),
+        residual_sd = sd(residual[index]),
+        residual_variance = var(residual[index]),
+        stringsAsFactors = FALSE
+      )
+    }
+  ))
 
   plot_data <- data.frame(fitted = fitted_mean, residual = residual)
   p_density <- bayesplot::ppc_dens_overlay(y, yrep[1:50, , drop = FALSE]) +
@@ -202,14 +241,19 @@ for (i in seq_len(nrow(specs))) {
 
 ppc_output <- do.call(rbind, ppc_rows)
 residual_output <- do.call(rbind, residual_rows)
+residual_stage_output <- do.call(rbind, residual_stage_rows)
 write.csv(ppc_output,
           file.path(output_dir, "posterior_predictive_summary.csv"),
           row.names = FALSE)
 write.csv(residual_output,
           file.path(output_dir, "residual_summary.csv"), row.names = FALSE)
+write.csv(residual_stage_output,
+          file.path(output_dir, "residual_by_stage.csv"), row.names = FALSE)
 
 cat("\nPosterior-predictive summaries\n")
 print(ppc_output, row.names = FALSE)
 cat("\nResidual summaries\n")
 print(residual_output, row.names = FALSE)
+cat("\nResidual summaries by stage\n")
+print(residual_stage_output, row.names = FALSE)
 cat("\nSaved diagnostics to ", output_dir, "\n", sep = "")
