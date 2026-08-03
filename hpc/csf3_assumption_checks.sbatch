@@ -20,11 +20,27 @@ output_dir="${DISSERTATION_OUTPUT_DIR:-${DISSERTATION_DATA_DIR}/results}"
 
 actual_git_commit="$(git -C "${repo_dir}" rev-parse HEAD)"
 echo "Git commit: ${actual_git_commit}"
-if [[ -n "$(git -C "${repo_dir}" status --porcelain --untracked-files=no)" ]]; then
+if [[ -n "$(git -C "${repo_dir}" status --porcelain)" ]]; then
   echo "Repository working tree is not clean; refusing non-reproducible diagnostics." >&2
   git -C "${repo_dir}" status --short >&2
   exit 2
 fi
+
+if [[ ! -f "${DISSERTATION_DATA_DIR}/MANIFEST.sha256" ]]; then
+  echo "Missing ${DISSERTATION_DATA_DIR}/MANIFEST.sha256" >&2
+  exit 2
+fi
+(
+  cd "${DISSERTATION_DATA_DIR}"
+  actual_manifest_sha256="$(sha256sum MANIFEST.sha256 | awk '{print $1}')"
+  echo "Input manifest SHA-256: ${actual_manifest_sha256}"
+  if [[ -n "${EXPECTED_MANIFEST_SHA256:-}" && \
+        "${actual_manifest_sha256}" != "${EXPECTED_MANIFEST_SHA256}" ]]; then
+    echo "Input manifest changed: expected ${EXPECTED_MANIFEST_SHA256}, got ${actual_manifest_sha256}" >&2
+    exit 2
+  fi
+  sha256sum -c MANIFEST.sha256
+)
 if [[ -n "${EXPECTED_GIT_COMMIT:-}" && \
       "${actual_git_commit}" != "${EXPECTED_GIT_COMMIT}" ]]; then
   echo "Repository changed after submission: expected ${EXPECTED_GIT_COMMIT}, got ${actual_git_commit}" >&2

@@ -2,7 +2,7 @@
 
 script_file <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value=TRUE)[1])
 repo_root <- normalizePath(file.path(dirname(script_file), ".."), mustWork=TRUE)
-source(file.path(repo_root, "R", "analysis_design.R"))
+source(file.path(repo_root, "analysis", "shared", "analysis_design.R"))
 
 lexical_examples <- c(
   " Word. ", "DON'T", "state-of-the-art", "“Quoted”", "—dash—",
@@ -43,7 +43,7 @@ stopifnot(
   unname(clustered[CONTRASTIVE_CLUSTER_ID]) == sum(pointwise[pair_rows])
 )
 
-helper_path <- file.path(repo_root, "R", "analysis_design.R")
+helper_path <- file.path(repo_root, "analysis", "shared", "analysis_design.R")
 hashes <- analysis_input_hashes(c(design_helper=helper_path))
 cached <- set_analysis_input_hashes(list(value=1L), hashes)
 stopifnot(

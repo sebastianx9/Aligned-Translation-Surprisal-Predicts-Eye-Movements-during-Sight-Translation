@@ -14,7 +14,10 @@ data_dir <- normalizePath(
 )
 skip_stan <- tolower(get_arg("--skip-stan", "false")) == "true"
 
-required_packages <- c("brms", "dplyr", "loo", "posterior")
+required_packages <- c(
+  "brms", "dplyr", "loo", "posterior",
+  "bayesplot", "ggplot2", "gridExtra"
+)
 missing_packages <- required_packages[
   !vapply(required_packages, requireNamespace, logical(1), quietly = TRUE)
 ]
@@ -34,19 +37,20 @@ repo_dir <- Sys.getenv(
   "DISSERTATION_REPO_DIR",
   normalizePath(file.path(dirname(script_file), ".."), mustWork = TRUE)
 )
-source(file.path(repo_dir, "R", "analysis_design.R"))
+source(file.path(repo_dir, "analysis", "shared", "analysis_design.R"))
 
-analysis_scripts <- file.path(repo_dir, c(
-  "RQ1/rq1_coef_maximal.R",
-  "RQ1/rq1_kfold_elpd.R",
-  "RQ1/rq1_joint_surprisal_kfold.R",
-  "RQ1/rq1_mass_stoplight_robustness.R",
-  "RQ1/rq_locus_kfold.R",
-  "RQ2/rq2_joint_maximal.R",
-  "RQ2/rq2_interaction_kfold.R",
-  "RQ2/rq2_reading_cmono_validation.R",
-  "RQ3/rq3_kfold_elpd.R"
-))
+registry_path <- file.path(repo_dir, "config", "analyses.tsv")
+registry <- read.delim(
+  registry_path, sep = "\t", quote = "", comment.char = "",
+  stringsAsFactors = FALSE, check.names = FALSE
+)
+stopifnot(
+  identical(names(registry), c("analysis", "script", "fixed_args")),
+  !anyDuplicated(registry$analysis),
+  all(nzchar(registry$analysis)),
+  all(nzchar(registry$script))
+)
+analysis_scripts <- file.path(repo_dir, unique(registry$script))
 stopifnot(all(file.exists(analysis_scripts)))
 invisible(lapply(analysis_scripts, parse))
 cat(sprintf("Parsed %d authoritative analysis scripts successfully.\n",

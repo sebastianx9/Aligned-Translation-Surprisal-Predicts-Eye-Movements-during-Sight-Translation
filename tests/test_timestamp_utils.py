@@ -3,7 +3,9 @@ import unittest
 from pathlib import Path
 
 
-EXTRACTION_DIR = Path(__file__).resolve().parents[1] / "data-extraction"
+EXTRACTION_DIR = (
+    Path(__file__).resolve().parents[1] / "extraction" / "eye_tracking"
+)
 sys.path.insert(0, str(EXTRACTION_DIR))
 
 from timestamp_utils import ts_to_seconds

@@ -32,6 +32,21 @@ fit <- readRDS(fit_path)
 if (!inherits(fit, "brmsfit")) {
   stop("The cached object is not a brmsfit: ", fit_path)
 }
+input_hashes <- attr(fit, "analysis_input_hashes", exact = TRUE)
+if (is.null(input_hashes) || !length(input_hashes)) {
+  stop("The cached fit lacks analysis-input hashes: ", fit_path)
+}
+input_hash_path <- file.path(
+  output_dir,
+  paste0(tools::file_path_sans_ext(basename(fit_path)), "_input_hashes.csv")
+)
+write.csv(
+  data.frame(
+    input = names(input_hashes), md5 = unname(input_hashes),
+    stringsAsFactors = FALSE
+  ),
+  input_hash_path, row.names = FALSE
+)
 
 draws <- posterior::as_draws_array(fit)
 diagnostics <- posterior::summarise_draws(
@@ -118,7 +133,8 @@ write.csv(
     observed_max_treedepth=max(treedepth),
     configured_max_treedepth=configured_treedepth,
     treedepth_hits=treedepth_hits,
-    min_bfmi=min(bfmi_by_chain, na.rm=TRUE)
+    min_bfmi=min(bfmi_by_chain, na.rm=TRUE),
+    input_hash_count=length(input_hashes)
   ),
   summary_path, row.names=FALSE
 )
@@ -146,5 +162,6 @@ print_rows(
 
 cat("\nFull diagnostics written to: ", csv_path, "\n", sep = "")
 cat("Sampler summary written to: ", summary_path, "\n", sep = "")
+cat("Analysis input hashes written to: ", input_hash_path, "\n", sep = "")
 cat("\nRandom-effects summary:\n")
 print(brms::VarCorr(fit), digits=4)

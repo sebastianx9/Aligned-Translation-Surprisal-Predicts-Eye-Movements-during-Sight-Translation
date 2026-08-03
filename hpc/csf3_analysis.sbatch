@@ -31,7 +31,7 @@ mkdir -p "${output_dir}" "${DISSERTATION_DATA_DIR}/brm_cache"
 
 actual_git_commit="$(git -C "${repo_dir}" rev-parse HEAD)"
 echo "Git commit: ${actual_git_commit}"
-if [[ -n "$(git -C "${repo_dir}" status --porcelain --untracked-files=no)" ]]; then
+if [[ -n "$(git -C "${repo_dir}" status --porcelain)" ]]; then
   echo "Repository working tree is not clean; refusing a non-reproducible run." >&2
   git -C "${repo_dir}" status --short >&2
   exit 2
@@ -73,58 +73,37 @@ sha256sum \
   "${DISSERTATION_DATA_DIR}/subtlex_us.csv"
 
 run_r() {
-  Rscript "$1" \
+  local script="$1"
+  shift
+  Rscript "${script}" \
     "--data-dir=${DISSERTATION_DATA_DIR}" \
     "--output-dir=${output_dir}" \
-    "--exclude-contrastive=${exclude_contrastive}"
+    "--exclude-contrastive=${exclude_contrastive}" \
+    "$@"
 }
 
-case "${ANALYSIS}" in
-  rq1_coef)
-    run_r "${repo_dir}/RQ1/rq1_coef_maximal.R"
-    ;;
-  rq1_cv)
-    run_r "${repo_dir}/RQ1/rq1_kfold_elpd.R"
-    ;;
-  rq1_joint_predictive)
-    run_r "${repo_dir}/RQ1/rq1_joint_surprisal_kfold.R"
-    ;;
-  rq1_robustness)
-    run_r "${repo_dir}/RQ1/rq1_mass_stoplight_robustness.R"
-    ;;
-  rq1_locus)
-    run_r "${repo_dir}/RQ1/rq_locus_kfold.R"
-    ;;
-  rq2_joint)
-    run_r "${repo_dir}/RQ2/rq2_joint_maximal.R"
-    ;;
-  rq2_joint_stoplight)
-    Rscript "${repo_dir}/RQ2/rq2_joint_maximal.R" \
-      "--data-dir=${DISSERTATION_DATA_DIR}" \
-      "--output-dir=${output_dir}" \
-      "--exclude-contrastive=${exclude_contrastive}" \
-      "--include-stoplight=true"
-    ;;
-  rq2_interaction_cv)
-    run_r "${repo_dir}/RQ2/rq2_interaction_kfold.R"
-    ;;
-  rq2_stage_sigma)
-    run_r "${repo_dir}/RQ2/rq2_stage_sigma_sensitivity.R"
-    ;;
-  rq2_reading_validation)
-    run_r "${repo_dir}/RQ2/rq2_reading_cmono_validation.R"
-    ;;
-  rq2_reading_cnmt_bridge)
-    run_r "${repo_dir}/RQ2/rq2_reading_cnmt_bridge.R"
-    ;;
-  rq3_cv)
-    run_r "${repo_dir}/RQ3/rq3_kfold_elpd.R"
-    ;;
-  rq3_coefficient_long_refit)
-    run_r "${repo_dir}/RQ3/rq3_coefficient_long_refit.R"
-    ;;
-  *)
-    echo "Unknown ANALYSIS=${ANALYSIS}" >&2
-    exit 2
-    ;;
-esac
+registry="${repo_dir}/config/analyses.tsv"
+if [[ ! -f "${registry}" ]]; then
+  echo "Missing analysis registry: ${registry}" >&2
+  exit 2
+fi
+registry_line="$(awk -F $'\t' -v key="${ANALYSIS}" '
+  NR > 1 && $1 == key { print; found = 1; exit }
+  END { if (!found) exit 2 }
+' "${registry}")" || {
+  echo "Unknown ANALYSIS=${ANALYSIS}" >&2
+  exit 2
+}
+IFS=$'\t' read -r registry_key script_relative fixed_args <<< "${registry_line}"
+script_path="${repo_dir}/${script_relative}"
+if [[ ! -f "${script_path}" ]]; then
+  echo "Registered analysis script is missing: ${script_path}" >&2
+  exit 2
+fi
+git -C "${repo_dir}" ls-files --error-unmatch "${script_relative}" >/dev/null
+
+analysis_args=()
+if [[ -n "${fixed_args}" ]]; then
+  read -r -a analysis_args <<< "${fixed_args}"
+fi
+run_r "${script_path}" "${analysis_args[@]}"

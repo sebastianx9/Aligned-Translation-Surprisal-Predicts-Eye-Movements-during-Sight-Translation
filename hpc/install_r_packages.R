@@ -5,7 +5,7 @@
 
 packages <- c(
   "brms", "dplyr", "loo", "posterior", "lme4", "lmerTest",
-  "ggplot2", "tidyr", "patchwork", "GGally"
+  "ggplot2", "tidyr", "patchwork", "GGally", "bayesplot", "gridExtra"
 )
 missing <- packages[
   !vapply(packages, requireNamespace, logical(1), quietly = TRUE)

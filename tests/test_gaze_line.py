@@ -5,7 +5,9 @@ from pathlib import Path
 from statistics import median
 
 
-EXTRACTION_DIR = Path(__file__).resolve().parents[1] / "data-extraction"
+EXTRACTION_DIR = (
+    Path(__file__).resolve().parents[1] / "extraction" / "eye_tracking"
+)
 sys.path.insert(0, str(EXTRACTION_DIR))
 
 from gaze_line import (

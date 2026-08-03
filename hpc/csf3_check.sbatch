@@ -19,7 +19,7 @@ repo_dir="${DISSERTATION_REPO_DIR:-${SLURM_SUBMIT_DIR}}"
 
 actual_git_commit="$(git -C "${repo_dir}" rev-parse HEAD)"
 echo "Git commit: ${actual_git_commit}"
-if [[ -n "$(git -C "${repo_dir}" status --porcelain --untracked-files=no)" ]]; then
+if [[ -n "$(git -C "${repo_dir}" status --porcelain)" ]]; then
   echo "Repository working tree is not clean; refusing a non-reproducible check." >&2
   git -C "${repo_dir}" status --short >&2
   exit 2

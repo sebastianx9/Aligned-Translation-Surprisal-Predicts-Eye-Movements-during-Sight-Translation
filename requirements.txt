@@ -6,3 +6,4 @@ matplotlib==3.10.8
 pillow==12.1.1
 sentencepiece==0.2.1
 sacremoses==0.1.1
+spacy==3.8.14

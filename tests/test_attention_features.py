@@ -5,10 +5,12 @@ from pathlib import Path
 import numpy as np
 
 
-EXTRACTION_DIR = Path(__file__).resolve().parents[1] / "data-extraction"
+EXTRACTION_DIR = (
+    Path(__file__).resolve().parents[1] / "extraction" / "predictors"
+)
 sys.path.insert(0, str(EXTRACTION_DIR))
 
-from extract_attention_features_norm import (
+from extract_attention_features import (
     lim_normalized_word_features,
     subwords_to_word_map,
 )
